@@ -1,0 +1,276 @@
+{
+  "memories": [
+    {
+      "id": "mem_1789047494249_dzf0",
+      "key": "project_info",
+      "value": "my project is called Studio AI",
+      "category": "fact",
+      "createdAt": 1789047494249,
+      "updatedAt": 1789047494249
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task_1789047855162_58fz",
+      "title": "Test local AI agent speech synthesis",
+      "status": "pending",
+      "priority": "medium",
+      "createdAt": 1789047855162
+    }
+  ],
+  "notes": [],
+  "reminders": [],
+  "userPreferences": {},
+  "conversationHistory": [
+    {
+      "role": "user",
+      "content": "hey how are you",
+      "timestamp": 1789199871681
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I am right here and ready to assist you. How can I help you today?",
+      "timestamp": 1789199872031
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": 1789199925790
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I am right here and ready to assist you. How can I help you today?",
+      "timestamp": 1789199925848
+    },
+    {
+      "role": "user",
+      "content": "who are you",
+      "timestamp": 1789200619823
+    },
+    {
+      "role": "assistant",
+      "content": "I am your AI Personal Assistant! I can manage your local files, check CPU and RAM resources, track tasks and notes, remember facts, search the web, and speak with real-time lip sync using your studio voice packs.",
+      "timestamp": 1789200619825
+    },
+    {
+      "role": "user",
+      "content": "hey how are you and who are you",
+      "timestamp": 1789202675870
+    },
+    {
+      "role": "assistant",
+      "content": "Hey there! Great to see you in the studio. What shall we work on?",
+      "timestamp": 1789202676116
+    },
+    {
+      "role": "user",
+      "content": "hey how are you doing",
+      "timestamp": 1789202772378
+    },
+    {
+      "role": "assistant",
+      "content": "Hey there! Great to see you in the studio. What shall we work on?",
+      "timestamp": 1789202772634
+    },
+    {
+      "role": "user",
+      "content": "whats the percentage of 2",
+      "timestamp": 1789203993023
+    },
+    {
+      "role": "assistant",
+      "content": "I'm right here! You asked: \"whats the percentage of 2\". I can check system stats, look up information, manage your tasks, or explore your workspace files. What would you like to do next?",
+      "timestamp": 1789203993026
+    },
+    {
+      "role": "user",
+      "content": "who are you",
+      "timestamp": 1789204094548
+    },
+    {
+      "role": "assistant",
+      "content": "I am your AI Personal Assistant! I can manage your local files, check CPU and RAM resources, track tasks and notes, remember facts, search the web, and speak with real-time lip sync using your studio voice packs.",
+      "timestamp": 1789204094810
+    },
+    {
+      "role": "user",
+      "content": "check CPU",
+      "timestamp": 1789204149801
+    },
+    {
+      "role": "assistant",
+      "content": "Memory usage is at 71% (4.5 GB free of 15.8 GB). Process memory is 96.4 MB.",
+      "timestamp": 1789204150102
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": 1789204555552
+    },
+    {
+      "role": "assistant",
+      "content": "Hey there! Great to see you in the studio. What shall we work on?",
+      "timestamp": 1789204555553
+    },
+    {
+      "role": "user",
+      "content": "who is the current president of america",
+      "timestamp": 1789223428537
+    },
+    {
+      "role": "assistant",
+      "content": "According to the latest information: President Trump built on his success in private life when he entered into politics and public service. He remarkably won the Presidency in his first ever run for any political office. The current President of the United States is Donald J. Trump, who began his second, nonconsecutive term on January 20, 2025 and is commonly counted as the 47th president in contemporary records [1] [2]. Official federal sites and the White House identify Donald J. Trump as the sitting president and list JD Vance as his vice president [3] [4].",
+      "timestamp": 1789223428544
+    },
+    {
+      "role": "user",
+      "content": "what is the date today",
+      "timestamp": 1789223469000
+    },
+    {
+      "role": "assistant",
+      "content": "I'm right here! You asked: \"what is the date today\". I can check system stats, look up information, manage your tasks, or explore your workspace files. What would you like to do next?",
+      "timestamp": 1789223469005
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": 1789223985098
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I am listening and ready to manage files, tasks, or answer your questions.",
+      "timestamp": 1789223985121
+    },
+    {
+      "role": "user",
+      "content": "who is the current president of america",
+      "timestamp": 1789224981855
+    },
+    {
+      "role": "assistant",
+      "content": "According to the latest information: President Trump built on his success in private life when he entered into politics and public service. He remarkably won the Presidency in his first ever run for any political office. The current President of the United States is Donald J. Trump, who began his second, nonconsecutive term on January 20, 2025 and is commonly counted as the 47th president in contemporary records [1] [2]. Official federal sites and the White House identify Donald J. Trump as the sitting president and list JD Vance as his vice president [3] [4].",
+      "timestamp": 1789224981874
+    },
+    {
+      "role": "user",
+      "content": "what's the weather today",
+      "timestamp": 1789225533537
+    },
+    {
+      "role": "assistant",
+      "content": "I'm right here! You asked: \"what's the weather today\". I can check system stats, look up information, manage your tasks, or explore your workspace files. What would you like to do next?",
+      "timestamp": 1789225533546
+    },
+    {
+      "role": "user",
+      "content": "Can you predict the weather for Tokyo tomorrow?",
+      "timestamp": 1789226446960
+    },
+    {
+      "role": "assistant",
+      "content": "Weather forecast for Tokyo, Tokyo, Japan:\nCurrently: Partly cloudy, 22°C (71°F), feels like 25°C (77°F). Humidity: 89%, Wind: 2 km/h.\nPredictions:\n• Today: Moderate drizzle, High 25°C (77°F) / Low 21°C (70°F), 11% chance of precipitation.\n• Tomorrow: Mainly clear, High 31°C (88°F) / Low 23°C (73°F), 20% chance of precipitation.",
+      "timestamp": 1789226446962
+    },
+    {
+      "role": "user",
+      "content": "what's the weather today",
+      "timestamp": 1789226814622
+    },
+    {
+      "role": "assistant",
+      "content": "I couldn't find an exact match for \"location city weather home\", but here is what I remember:\n• project_info: my project is called Studio AI",
+      "timestamp": 1789226814632
+    },
+    {
+      "role": "user",
+      "content": "what's the weather in banglore today",
+      "timestamp": 1789226876402
+    },
+    {
+      "role": "assistant",
+      "content": "Weather forecast for Bangalore Town, Sindh, Pakistan:\nCurrently: Clear sky, 28°C (82°F), feels like 32°C (89°F). Humidity: 79%, Wind: 9 km/h.\nPredictions:\n• Today: Overcast, High 33°C (91°F) / Low 25°C (77°F), 0% chance of precipitation.",
+      "timestamp": 1789226876405
+    },
+    {
+      "role": "user",
+      "content": "hey what's the weather in Bangalore",
+      "timestamp": 1789226987576
+    },
+    {
+      "role": "assistant",
+      "content": "Could not locate \"Bangalore, India\". Please verify the city or location name.",
+      "timestamp": 1789226987579
+    },
+    {
+      "role": "user",
+      "content": "what's the weather in Bangalore city",
+      "timestamp": 1789227016613
+    },
+    {
+      "role": "assistant",
+      "content": "In Bengaluru today, it is currently overcast with a temperature of 27°C (81°F) that feels like 29°C (84°F). Expect light drizzle throughout the day with a high reaching 30°C (86°F) and a low around 22°C (72°F). Winds are gentle at around 5 km/h with 51% humidity, making for a pleasantly cool evening.",
+      "timestamp": 1789227016619
+    },
+    {
+      "role": "user",
+      "content": "hey what's the weather in a Bangalore today",
+      "timestamp": 1789227049640
+    },
+    {
+      "role": "assistant",
+      "content": "In Bengaluru today, conditions are currently overcast at 27°C (81°F) with a real-feel temperature of 29°C (84°F). You can expect light drizzle at times, with temperatures reaching a high of 30°C (86°F) and dipping to a comfortable 22°C (72°F) tonight. With gentle winds and moderate humidity around 51%, it remains a pleasant day across the city.",
+      "timestamp": 1789227049645
+    },
+    {
+      "role": "user",
+      "content": "who is the",
+      "timestamp": 1789227162423
+    },
+    {
+      "role": "assistant",
+      "content": "It looks like your message got cut off! Who were you curious to learn about? Feel free to complete your question, and I'll be happy to help you find the information.",
+      "timestamp": 1789227162430
+    },
+    {
+      "role": "user",
+      "content": "who is the current Vice President of India",
+      "timestamp": 1789227178689
+    },
+    {
+      "role": "assistant",
+      "content": "Based on current live search results: Check the complete list of Vice Presidents of India from1952 to 2026 , their powers, functions, constitutional provisions, tenure, eligibility, and key facts. Vice President of India Vice President of India Shri C.P. Radhakrishnan View VP's Profile Download Official Photograph",
+      "timestamp": 1789227178694
+    },
+    {
+      "role": "user",
+      "content": "now who is the Vice President of India in 2026",
+      "timestamp": 1789227209118
+    },
+    {
+      "role": "assistant",
+      "content": "Based on current live search results: Vice President of India Vice President of India Shri C.P. Radhakrishnan View VP's Profile Download Official Photograph Check the complete list of Vice Presidents of India from1952 to 2026 , their powers, functions, constitutional provisions, tenure, eligibility, and key facts.",
+      "timestamp": 1789227209121
+    },
+    {
+      "role": "user",
+      "content": "who is the current President of America",
+      "timestamp": 1789227241349
+    },
+    {
+      "role": "assistant",
+      "content": "The current President of the United States is Donald J. Trump. He assumed office as the 47th President on January 20, 2025, following the November 2024 presidential election. He is currently serving his second non-consecutive term in the White House.",
+      "timestamp": 1789227241357
+    },
+    {
+      "role": "user",
+      "content": "who is the current president of amecirca",
+      "timestamp": 1789227288853
+    },
+    {
+      "role": "assistant",
+      "content": "The current President of the United States (America) is Donald J. Trump. He is serving as the 47th President after taking office on January 20, 2025. JD Vance serves alongside him as the Vice President.",
+      "timestamp": 1789227288862
+    }
+  ]
+}
