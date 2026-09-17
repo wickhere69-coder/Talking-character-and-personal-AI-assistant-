@@ -88,6 +88,13 @@ export default function Character({ url }: { url?: string }) {
 
   useEffect(() => {
     lipSyncController.current = new LipSyncController(morphMeshes.current);
+    const audioElement = typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null;
+    if (audioElement) {
+      lipSyncController.current.connectAudioElement(audioElement);
+    }
+    const currentDelay = useAppStore.getState().lipSyncDelayMs;
+    lipSyncController.current.setSyncDelayMs(currentDelay);
+
     proceduralAnimation.current = new ProceduralAnimation(
       morphMeshes.current, 
       bones.current
@@ -98,6 +105,20 @@ export default function Character({ url }: { url?: string }) {
   const speechText = useAppStore((state) => state.speechText);
   const activeCharIndex = useAppStore((state) => state.activeCharIndex);
   const isSpeaking = useAppStore((state) => state.isSpeaking);
+  const lipSyncDelayMs = useAppStore((state) => state.lipSyncDelayMs);
+  const selectedVoice = useAppStore((state) => state.selectedVoice);
+  const voices = useAppStore((state) => state.voices);
+
+  const activeRate = useMemo(() => {
+    const v = voices.find((v) => v.id === selectedVoice);
+    return v?.rate || 1.0;
+  }, [voices, selectedVoice]);
+
+  useEffect(() => {
+    if (lipSyncController.current) {
+      lipSyncController.current.setSyncDelayMs(lipSyncDelayMs);
+    }
+  }, [lipSyncDelayMs]);
 
   useEffect(() => {
     if (lipSyncController.current) {
@@ -107,20 +128,18 @@ export default function Character({ url }: { url?: string }) {
 
   useEffect(() => {
     if (lipSyncController.current && speechText && isSpeaking) {
-      lipSyncController.current.startSpeechTimeline(speechText);
+      lipSyncController.current.startSpeechTimeline(speechText, activeRate);
     } else if (!isSpeaking && lipSyncController.current) {
       lipSyncController.current.stopSpeech();
     }
-  }, [speechText, isSpeaking]);
+  }, [speechText, isSpeaking, activeRate]);
 
   const audioUrl = useAppStore((state) => state.audioUrl);
 
   useEffect(() => {
-    if (audioUrl) {
-      const audioElement = document.getElementById('tts-audio') as HTMLAudioElement;
-      if (audioElement && lipSyncController.current) {
-        lipSyncController.current.connectAudioElement(audioElement);
-      }
+    const audioElement = typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null;
+    if (audioElement && lipSyncController.current) {
+      lipSyncController.current.connectAudioElement(audioElement);
     }
   }, [audioUrl]);
 
@@ -132,14 +151,10 @@ export default function Character({ url }: { url?: string }) {
 
   useFrame((state, delta) => {
     const { isSpeaking, playbackState, agentStatus } = useAppStore.getState();
-    const audioElement = document.getElementById('tts-audio') as HTMLAudioElement;
-    const audioCurrentTimeMs = audioElement && !audioElement.paused ? audioElement.currentTime * 1000 : 0;
-    
-    // Character is actively speaking if either flag is true
     const speaking = isSpeaking || playbackState === 'playing';
 
     if (lipSyncController.current) {
-      lipSyncController.current.update(delta, audioCurrentTimeMs, speaking);
+      lipSyncController.current.update(delta, 0, speaking);
     }
     
     if (proceduralAnimation.current) {

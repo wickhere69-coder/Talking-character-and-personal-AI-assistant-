@@ -24,106 +24,6 @@
   "conversationHistory": [
     {
       "role": "user",
-      "content": "hey how are you",
-      "timestamp": 1789199871681
-    },
-    {
-      "role": "assistant",
-      "content": "Hello! I am right here and ready to assist you. How can I help you today?",
-      "timestamp": 1789199872031
-    },
-    {
-      "role": "user",
-      "content": "hey",
-      "timestamp": 1789199925790
-    },
-    {
-      "role": "assistant",
-      "content": "Hello! I am right here and ready to assist you. How can I help you today?",
-      "timestamp": 1789199925848
-    },
-    {
-      "role": "user",
-      "content": "who are you",
-      "timestamp": 1789200619823
-    },
-    {
-      "role": "assistant",
-      "content": "I am your AI Personal Assistant! I can manage your local files, check CPU and RAM resources, track tasks and notes, remember facts, search the web, and speak with real-time lip sync using your studio voice packs.",
-      "timestamp": 1789200619825
-    },
-    {
-      "role": "user",
-      "content": "hey how are you and who are you",
-      "timestamp": 1789202675870
-    },
-    {
-      "role": "assistant",
-      "content": "Hey there! Great to see you in the studio. What shall we work on?",
-      "timestamp": 1789202676116
-    },
-    {
-      "role": "user",
-      "content": "hey how are you doing",
-      "timestamp": 1789202772378
-    },
-    {
-      "role": "assistant",
-      "content": "Hey there! Great to see you in the studio. What shall we work on?",
-      "timestamp": 1789202772634
-    },
-    {
-      "role": "user",
-      "content": "whats the percentage of 2",
-      "timestamp": 1789203993023
-    },
-    {
-      "role": "assistant",
-      "content": "I'm right here! You asked: \"whats the percentage of 2\". I can check system stats, look up information, manage your tasks, or explore your workspace files. What would you like to do next?",
-      "timestamp": 1789203993026
-    },
-    {
-      "role": "user",
-      "content": "who are you",
-      "timestamp": 1789204094548
-    },
-    {
-      "role": "assistant",
-      "content": "I am your AI Personal Assistant! I can manage your local files, check CPU and RAM resources, track tasks and notes, remember facts, search the web, and speak with real-time lip sync using your studio voice packs.",
-      "timestamp": 1789204094810
-    },
-    {
-      "role": "user",
-      "content": "check CPU",
-      "timestamp": 1789204149801
-    },
-    {
-      "role": "assistant",
-      "content": "Memory usage is at 71% (4.5 GB free of 15.8 GB). Process memory is 96.4 MB.",
-      "timestamp": 1789204150102
-    },
-    {
-      "role": "user",
-      "content": "hey",
-      "timestamp": 1789204555552
-    },
-    {
-      "role": "assistant",
-      "content": "Hey there! Great to see you in the studio. What shall we work on?",
-      "timestamp": 1789204555553
-    },
-    {
-      "role": "user",
-      "content": "who is the current president of america",
-      "timestamp": 1789223428537
-    },
-    {
-      "role": "assistant",
-      "content": "According to the latest information: President Trump built on his success in private life when he entered into politics and public service. He remarkably won the Presidency in his first ever run for any political office. The current President of the United States is Donald J. Trump, who began his second, nonconsecutive term on January 20, 2025 and is commonly counted as the 47th president in contemporary records [1] [2]. Official federal sites and the White House identify Donald J. Trump as the sitting president and list JD Vance as his vice president [3] [4].",
-      "timestamp": 1789223428544
-    },
-    {
-      "role": "user",
       "content": "what is the date today",
       "timestamp": 1789223469000
     },
@@ -271,6 +171,106 @@
       "role": "assistant",
       "content": "The current President of the United States (America) is Donald J. Trump. He is serving as the 47th President after taking office on January 20, 2025. JD Vance serves alongside him as the Vice President.",
       "timestamp": 1789227288862
+    },
+    {
+      "role": "user",
+      "content": "did you know about BRICS",
+      "timestamp": 1789650399977
+    },
+    {
+      "role": "assistant",
+      "content": "Yes! BRICS originally formed as an intergovernmental coalition of major emerging economies—Brazil, Russia, India, China, and South Africa—and has recently expanded into \"BRICS+\" to include members like Egypt, Ethiopia, Iran, and the UAE. Together, the bloc represents around 45% of the global population and over a third of global GDP, focusing on de-dollarization, local currency trade, and Global South cooperation. With key milestones like India hosting the 18th BRICS Summit in September 2026, the group continues to be a major force in reshaping international finance and geopolitics.",
+      "timestamp": 1789650399980
+    },
+    {
+      "role": "user",
+      "content": "do you know about BRICS",
+      "timestamp": 1789651479392
+    },
+    {
+      "role": "assistant",
+      "content": "I'm right here! You asked: \"do you know about BRICS\". I can check system stats, look up information, manage your tasks, or explore your workspace files. What would you like to do next?",
+      "timestamp": 1789651479688
+    },
+    {
+      "role": "user",
+      "content": "do you know about BRICS",
+      "timestamp": 1789651511540
+    },
+    {
+      "role": "assistant",
+      "content": "Yes, BRICS is an influential intergovernmental alliance originally made up of Brazil, Russia, India, China, and South Africa. The coalition expanded into \"BRICS+\" by welcoming new members including Egypt, Ethiopia, Iran, and the UAE to foster economic integration and strengthen the voice of the Global South. Today, the bloc focuses heavily on de-dollarization, local currency trade, and reforming global economic and financial governance.",
+      "timestamp": 1789651511545
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": 1789651550863
+    },
+    {
+      "role": "assistant",
+      "content": "Hey there! How can I assist you today? Whether you want to check local files, manage your tasks, check the weather, or explore a topic, just let me know!",
+      "timestamp": 1789651550865
+    },
+    {
+      "role": "user",
+      "content": "hey what's the date today",
+      "timestamp": 1789651692664
+    },
+    {
+      "role": "assistant",
+      "content": "Today is Thursday, September 17, 2026. Is there anything specific on your schedule for today, or any tasks or notes you'd like me to look up or manage for you?",
+      "timestamp": 1789651692673
+    },
+    {
+      "role": "user",
+      "content": "what's the famous place in mysuru",
+      "timestamp": 1789651758208
+    },
+    {
+      "role": "assistant",
+      "content": "The most famous landmark in Mysuru is the magnificent Mysuru Palace (Amba Vilas Palace), renowned for its grand Indo-Saracenic architecture and spectacular evening illumination. Other iconic attractions in the city include Chamundi Hill with the sacred Chamundeshwari Temple, the historic Mysuru Zoo, and the lush Brindavan Gardens. Mysuru is deeply celebrated for its rich royal heritage, vibrant Dussehra festivities, and famous local crafts like silk and sandalwood.",
+      "timestamp": 1789651758212
+    },
+    {
+      "role": "user",
+      "content": "hey what's the date today",
+      "timestamp": 1789652987306
+    },
+    {
+      "role": "assistant",
+      "content": "Today is Thursday, September 17, 2026. Let me know if you need help with your schedule or anything else today!",
+      "timestamp": 1789652987313
+    },
+    {
+      "role": "user",
+      "content": "hey what's the date toady",
+      "timestamp": 1789653367653
+    },
+    {
+      "role": "assistant",
+      "content": "Today is Thursday, September 17, 2026.",
+      "timestamp": 1789653367659
+    },
+    {
+      "role": "user",
+      "content": "What's the date today?",
+      "timestamp": 1789653539248
+    },
+    {
+      "role": "assistant",
+      "content": "Today is Thursday, September 17, 2026.",
+      "timestamp": 1789653539260
+    },
+    {
+      "role": "user",
+      "content": "What's the date today?",
+      "timestamp": 1789653553940
+    },
+    {
+      "role": "assistant",
+      "content": "Today is Thursday, September 17, 2026. Please let me know if there's anything specific I can help you with today!",
+      "timestamp": 1789653553951
     }
   ]
 }

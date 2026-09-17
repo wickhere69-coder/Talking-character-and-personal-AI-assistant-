@@ -1,7 +1,6 @@
 import { IAIProvider } from './IAIProvider';
-import { GroqProvider } from './GroqProvider';
+import { GrokProvider } from './GrokProvider';
 import { GeminiProvider } from './GeminiProvider';
-import { OllamaProvider } from './OllamaProvider';
 import { LocalModelProvider } from './LocalModelProvider';
 import { FallbackLocalProvider } from './FallbackLocalProvider';
 import { AgentConfig, AgentMessage, ToolDefinition, ProviderResponse } from '../types';
@@ -10,13 +9,12 @@ export class ProviderManager {
   private providers: Map<string, IAIProvider> = new Map();
   private defaultProviderName: string;
 
-  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'local_fallback') {
+  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'grok') {
     this.defaultProviderName = defaultProviderName;
 
     // Register supported providers
-    this.registerProvider(new GroqProvider());
+    this.registerProvider(new GrokProvider());
     this.registerProvider(new GeminiProvider());
-    this.registerProvider(new OllamaProvider());
     this.registerProvider(new LocalModelProvider());
     this.registerProvider(new FallbackLocalProvider());
   }
@@ -38,7 +36,7 @@ export class ProviderManager {
 
   /**
    * Resolves the active provider. If 'auto' or chosen provider unavailable,
-   * cascades: Groq -> Gemini -> Ollama -> Local OpenAI -> Local Fallback.
+   * cascades: Grok -> Gemini -> Local OpenAI -> Local Fallback.
    */
   async getActiveProvider(overrideName?: string): Promise<IAIProvider> {
     const target = overrideName || this.defaultProviderName;
@@ -51,10 +49,10 @@ export class ProviderManager {
     }
 
     // Auto detection cascade:
-    // 1. Check Groq (cloud ultra-fast)
-    const groq = this.providers.get('groq');
-    if (groq && (await groq.isAvailable())) {
-      return groq;
+    // 1. Check Grok (xAI Grok 4.6 flagship)
+    const grok = this.providers.get('grok');
+    if (grok && (await grok.isAvailable())) {
+      return grok;
     }
 
     // 2. Check Gemini (Google cloud fast)
@@ -63,19 +61,13 @@ export class ProviderManager {
       return gemini;
     }
 
-    // 3. Check Ollama (local neural)
-    const ollama = this.providers.get('ollama');
-    if (ollama && (await ollama.isAvailable())) {
-      return ollama;
-    }
-
-    // 4. Check Local OpenAI endpoint
+    // 3. Check Local OpenAI endpoint
     const localOpenai = this.providers.get('local_openai');
     if (localOpenai && (await localOpenai.isAvailable())) {
       return localOpenai;
     }
 
-    // 5. Guaranteed offline fallback
+    // 4. Guaranteed offline fallback
     return this.providers.get('local_fallback')!;
   }
 

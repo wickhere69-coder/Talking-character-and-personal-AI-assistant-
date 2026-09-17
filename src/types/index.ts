@@ -128,6 +128,8 @@ export interface AppState {
   setSpeechText: (text: string) => void;
   activeCharIndex: number;
   setActiveCharIndex: (idx: number) => void;
+  lipSyncDelayMs: number;
+  setLipSyncDelayMs: (delay: number) => void;
 
   // Speech Recognition / Voice Repeat
   isListening: boolean;
@@ -140,8 +142,8 @@ export interface AppState {
   setAgentMode: (mode: boolean) => void;
   agentModeType: 'agent' | 'chat' | 'repeat';
   setAgentModeType: (mode: 'agent' | 'chat' | 'repeat') => void;
-  agentSpeed: 'instant' | 'groq' | 'gemini' | 'ollama';
-  setAgentSpeed: (speed: 'instant' | 'groq' | 'gemini' | 'ollama') => void;
+  agentSpeed: 'instant' | 'grok' | 'gemini';
+  setAgentSpeed: (speed: 'instant' | 'grok' | 'gemini') => void;
   agentStatus: 'idle' | 'listening' | 'thinking' | 'planning' | 'executing_tool' | 'speaking' | 'completed' | 'error' | 'awaiting_confirmation';
   setAgentStatus: (status: 'idle' | 'listening' | 'thinking' | 'planning' | 'executing_tool' | 'speaking' | 'completed' | 'error' | 'awaiting_confirmation') => void;
   currentAgentAction: string | null;

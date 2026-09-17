@@ -18,15 +18,18 @@ export const useAppStore = create<AppState>((set) => ({
   isSpeaking: false,
   speechText: '',
   activeCharIndex: 0,
+  lipSyncDelayMs: typeof window !== 'undefined' 
+    ? Number(localStorage.getItem('talking_character_lipsync_delay') ?? 120) 
+    : 120,
   isListening: false,
   autoRepeat: false,
   agentMode: true,
   agentModeType: 'agent',
-  agentSpeed: 'ollama',
+  agentSpeed: 'grok',
   agentStatus: 'idle',
   currentAgentAction: null,
   pendingConfirmation: null,
-  agentModelName: 'Fast Ollama (Local)',
+  agentModelName: 'Grok 4.6 (xAI)',
   activeTaskSteps: [],
   isHistoryModalOpen: false,
   lastFullResponse: '',
@@ -49,6 +52,12 @@ export const useAppStore = create<AppState>((set) => ({
   setIsSpeaking: (isSpeaking) => set({ isSpeaking }),
   setSpeechText: (speechText) => set({ speechText }),
   setActiveCharIndex: (activeCharIndex) => set({ activeCharIndex }),
+  setLipSyncDelayMs: (lipSyncDelayMs) => {
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('talking_character_lipsync_delay', String(lipSyncDelayMs)); } catch {}
+    }
+    set({ lipSyncDelayMs });
+  },
   setIsListening: (isListening) => set({ isListening }),
   setAutoRepeat: (autoRepeat) => set({ autoRepeat }),
   setAgentMode: (agentMode) => set({ agentMode }),

@@ -81,7 +81,7 @@ export async function clearAgentHistory(): Promise<boolean> {
   return false;
 }
 
-export async function saveAgentApiKey(provider: 'groq' | 'gemini' | 'elevenlabs', apiKey: string): Promise<boolean> {
+export async function saveAgentApiKey(provider: 'grok' | 'gemini' | 'elevenlabs', apiKey: string): Promise<boolean> {
   try {
     const res = await fetch('/api/agent/save-key', {
       method: 'POST',
@@ -94,13 +94,13 @@ export async function saveAgentApiKey(provider: 'groq' | 'gemini' | 'elevenlabs'
   }
 }
 
-export async function getAgentKeyStatus(): Promise<{ groq: boolean; gemini: boolean; elevenlabs: boolean }> {
+export async function getAgentKeyStatus(): Promise<{ grok: boolean; gemini: boolean; elevenlabs: boolean }> {
   try {
     const res = await fetch('/api/agent/key-status');
     if (res.ok) {
       return await res.json();
     }
   } catch {}
-  return { groq: false, gemini: false, elevenlabs: false };
+  return { grok: false, gemini: false, elevenlabs: false };
 }
 

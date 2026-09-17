@@ -225,25 +225,4 @@ app.use('/api/agent', createAgentRouter());
 
 app.listen(PORT, () => {
   console.log(`TTS proxy server running on http://localhost:${PORT}`);
-  // Asynchronously warm up Ollama model in RAM so user gets fast responses immediately
-  const warmupModel = process.env.OLLAMA_MODEL || 'llama3.2:3b';
-  axios.post('http://127.0.0.1:11434/api/chat', {
-    model: warmupModel,
-    messages: [{ role: 'user', content: 'ready' }],
-    keep_alive: '24h',
-    stream: false,
-    options: { num_predict: 1 }
-  }, { timeout: 35000 }).then(() => {
-    console.log(`Ollama model (${warmupModel}) successfully warmed up and pinned in RAM.`);
-  }).catch((err) => {
-    console.warn(`Ollama warmup notice (${warmupModel}):`, err.message);
-    // Fallback warmup for qwen2.5:1.5b
-    axios.post('http://127.0.0.1:11434/api/chat', {
-      model: 'qwen2.5:1.5b',
-      messages: [{ role: 'user', content: 'ready' }],
-      keep_alive: '24h',
-      stream: false,
-      options: { num_predict: 1 }
-    }, { timeout: 25000 }).catch(() => {});
-  });
 });

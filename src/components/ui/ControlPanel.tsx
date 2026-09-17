@@ -41,7 +41,8 @@ import {
   PanelRightOpen,
   Sparkles,
   Flame,
-  ExternalLink
+  ExternalLink,
+  Sliders
 } from 'lucide-react';
 
 export default function ControlPanel() {
@@ -53,6 +54,7 @@ export default function ControlPanel() {
     activeCamera, setActiveCamera,
     setIsSpeaking,
     setSpeechText,
+    lipSyncDelayMs, setLipSyncDelayMs,
     isListening, setIsListening,
     autoRepeat,
     agentModeType, setAgentModeType,
@@ -74,18 +76,18 @@ export default function ControlPanel() {
   const [elevenLabsKey, setElevenLabsKey] = useState<string>(() => {
     return typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
   });
-  const [groqKey, setGroqKey] = useState<string>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('groq_api_key') || '' : '';
+  const [grokKey, setGrokKey] = useState<string>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('grok_api_key') || localStorage.getItem('xai_api_key') || '' : '';
   });
   const [geminiKey, setGeminiKey] = useState<string>(() => {
     return typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') || '' : '';
   });
-  const [keyStatuses, setKeyStatuses] = useState<{ groq: boolean; gemini: boolean; elevenlabs: boolean }>({
-    groq: false,
+  const [keyStatuses, setKeyStatuses] = useState<{ grok: boolean; gemini: boolean; elevenlabs: boolean }>({
+    grok: false,
     gemini: false,
     elevenlabs: false
   });
-  const [activeKeyTab, setActiveKeyTab] = useState<'groq' | 'gemini' | 'elevenlabs'>('groq');
+  const [activeKeyTab, setActiveKeyTab] = useState<'grok' | 'gemini' | 'elevenlabs'>('grok');
   const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [keyToastMessage, setKeyToastMessage] = useState<string | null>(null);
   const [historyClearedToast, setHistoryClearedToast] = useState(false);
@@ -194,28 +196,6 @@ export default function ControlPanel() {
       .trim();
   };
 
-  const playElevenLabsPreview = useCallback(async (voice: { previewUrl?: string; sampleText?: string; name: string }, customText?: string) => {
-    if (!voice.previewUrl) return;
-
-    // Hard-stop microphone and any existing speech
-    stopListening();
-    voiceManager.stopAll('preview_voice');
-
-    const textForLipSync = customText || voice.sampleText || `Hello! This is ${voice.name.replace(/\(ElevenLabs\)/g, '').trim()}.`;
-    setSpeechText(textForLipSync);
-    setVisemeQueue([]);
-    setAudioUrl(voice.previewUrl);
-    setPlaybackState('playing');
-    setIsSpeaking(true);
-
-    const audio = voiceManager.getAudioElement() || (typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null);
-    if (audio) {
-      audio.src = voice.previewUrl;
-      audio.currentTime = 0;
-      await audio.play().catch(console.error);
-    }
-  }, [stopListening, setSpeechText, setAudioUrl, setPlaybackState, setIsSpeaking, setVisemeQueue]);
-
   const speakAndSync = useCallback(async (textToSpeak: string) => {
     const cleaned = cleanTextForSpeech(textToSpeak);
     if (!cleaned) return;
@@ -301,12 +281,10 @@ export default function ControlPanel() {
 
       if (res.modelUsed) {
         const readableModel =
-          res.modelUsed === 'groq'
-            ? 'Groq (LLaMA 3.3 70B)'
+          res.modelUsed === 'grok'
+            ? 'xAI Grok 4.6'
             : res.modelUsed === 'gemini'
             ? 'Google Gemini 3.8 Flash'
-            : res.modelUsed === 'ollama'
-            ? 'Local Ollama (Llama 3.2 3B)'
             : res.modelUsed === 'local_openai'
             ? 'Local OpenAI LLM'
             : 'Fast Local Engine';
@@ -566,7 +544,7 @@ export default function ControlPanel() {
             </div>
           </div>
 
-          {/* ── 3. Engine Selection (4 Compact Cards) ── */}
+          {/* ── 3. Engine Selection (Grok 4.6, Gemini 3.8, Instant) ── */}
           {agentModeType !== 'repeat' && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
@@ -574,32 +552,32 @@ export default function ControlPanel() {
                   Engine
                 </span>
                 <span className="text-[10px] text-[#9898A3] font-mono">
-                  {agentSpeed === 'instant' ? '<0.1s' : agentSpeed === 'groq' ? '~0.3s' : agentSpeed === 'gemini' ? '~0.5s' : '~2.5s'}
+                  {agentSpeed === 'instant' ? '<0.1s' : '~0.4s'}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                {/* Groq Cloud */}
+                {/* Grok 4.6 Cloud */}
                 <button
                   type="button"
-                  onClick={() => setAgentSpeed('groq')}
+                  onClick={() => setAgentSpeed('grok')}
                   className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 ${
-                    agentSpeed === 'groq'
-                      ? 'bg-[#1A1A1F] border-amber-500/70 text-[#F5F5F7] shadow-[0_0_15px_rgba(245,158,11,0.15)]'
+                    agentSpeed === 'grok'
+                      ? 'bg-[#1A1A1F] border-cyan-500/70 text-[#F5F5F7] shadow-[0_0_15px_rgba(6,182,212,0.15)]'
                       : 'bg-[#1A1A1F]/60 border-white/[0.05] text-[#9898A3] hover:border-white/[0.1] hover:text-[#F5F5F7]'
                   }`}
-                  title="Groq Ultra-Fast Cloud (LLaMA 3.3 70B, Free Tier)"
+                  title="xAI Grok 4.6 Flagship Intelligence (Cloud)"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium flex items-center gap-1.5 text-[#F5F5F7]">
-                      <Flame size={13} strokeWidth={1.5} className={agentSpeed === 'groq' ? 'text-amber-400' : 'text-[#686873]'} />
-                      Groq
+                      <Sparkles size={13} strokeWidth={1.5} className={agentSpeed === 'grok' ? 'text-cyan-400' : 'text-[#686873]'} />
+                      Grok 4.6
                     </span>
-                    <span className="text-[10px] text-amber-400/90 font-mono">~0.3s</span>
+                    <span className="text-[10px] text-cyan-400/90 font-mono">~0.4s</span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-[#686873] leading-tight">
-                    <span>LLaMA 3.3 70B</span>
-                    {keyStatuses.groq && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" title="Key Configured" />}
+                    <span>xAI Flagship</span>
+                    {keyStatuses.grok && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" title="Key Configured" />}
                   </div>
                 </button>
 
@@ -626,49 +604,26 @@ export default function ControlPanel() {
                     {keyStatuses.gemini && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" title="Key Configured" />}
                   </div>
                 </button>
-
-                {/* Ollama Local */}
-                <button
-                  type="button"
-                  onClick={() => setAgentSpeed('ollama')}
-                  className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 ${
-                    agentSpeed === 'ollama'
-                      ? 'bg-[#1A1A1F] border-[#7C3AED]/70 text-[#F5F5F7] shadow-[0_0_15px_rgba(124,58,237,0.15)]'
-                      : 'bg-[#1A1A1F]/60 border-white/[0.05] text-[#9898A3] hover:border-white/[0.1] hover:text-[#F5F5F7]'
-                  }`}
-                  title="Local Ollama neural model (Llama 3.2 3B) running in memory (~2.5s)"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium flex items-center gap-1.5 text-[#F5F5F7]">
-                      <Cpu size={13} strokeWidth={1.5} className={agentSpeed === 'ollama' ? 'text-[#8B5CF6]' : 'text-[#686873]'} />
-                      Ollama
-                    </span>
-                    <span className="text-[10px] text-[#686873] font-mono">~2.5s</span>
-                  </div>
-                  <span className="text-[10px] text-[#686873] leading-tight">Llama 3.2 (Local)</span>
-                </button>
-
-                {/* Instant Engine */}
-                <button
-                  type="button"
-                  onClick={() => setAgentSpeed('instant')}
-                  className={`p-2.5 rounded-xl border text-left transition-all flex flex-col gap-1 ${
-                    agentSpeed === 'instant'
-                      ? 'bg-[#1A1A1F] border-[#7C3AED]/70 text-[#F5F5F7] shadow-[0_0_15px_rgba(124,58,237,0.15)]'
-                      : 'bg-[#1A1A1F]/60 border-white/[0.05] text-[#9898A3] hover:border-white/[0.1] hover:text-[#F5F5F7]'
-                  }`}
-                  title="Instantaneous response (< 0.1s) with local fast engine & real-time tools"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium flex items-center gap-1.5 text-[#F5F5F7]">
-                      <Zap size={13} strokeWidth={1.5} className={agentSpeed === 'instant' ? 'text-[#8B5CF6]' : 'text-[#686873]'} />
-                      Instant
-                    </span>
-                    <span className="text-[10px] text-[#686873] font-mono">&lt;0.1s</span>
-                  </div>
-                  <span className="text-[10px] text-[#686873] leading-tight">Fast rule engine</span>
-                </button>
               </div>
+
+              {/* Instant Engine */}
+              <button
+                type="button"
+                onClick={() => setAgentSpeed('instant')}
+                className={`p-2 rounded-xl border text-left transition-all flex items-center justify-between ${
+                  agentSpeed === 'instant'
+                    ? 'bg-[#1A1A1F] border-[#7C3AED]/70 text-[#F5F5F7] shadow-[0_0_15px_rgba(124,58,237,0.15)]'
+                    : 'bg-[#1A1A1F]/60 border-white/[0.05] text-[#9898A3] hover:border-white/[0.1] hover:text-[#F5F5F7]'
+                }`}
+                title="Instantaneous response (< 0.1s) with local fast engine & real-time tools"
+              >
+                <div className="flex items-center gap-2">
+                  <Zap size={13} strokeWidth={1.5} className={agentSpeed === 'instant' ? 'text-[#8B5CF6]' : 'text-[#686873]'} />
+                  <span className="text-xs font-medium text-[#F5F5F7]">Instant Engine</span>
+                  <span className="text-[10px] text-[#686873]">Fast offline rule engine</span>
+                </div>
+                <span className="text-[10px] text-[#686873] font-mono">&lt;0.1s</span>
+              </button>
             </div>
           )}
 
@@ -949,6 +904,79 @@ export default function ControlPanel() {
               })}
             </div>
 
+            {/* ── 8b. Lip-Sync Latency & Calibration ── */}
+            <div className="p-3 rounded-xl bg-[#1A1A1F]/70 border border-white/[0.06] flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Sliders size={12} strokeWidth={1.5} className="text-[#A78BFA]" />
+                  <span className="text-[11px] font-medium text-[#F5F5F7]">
+                    Lip-Sync Calibration
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-[#A78BFA] bg-[#7C3AED]/15 px-2 py-0.5 rounded-md border border-[#7C3AED]/25">
+                  {lipSyncDelayMs > 0 ? `+${lipSyncDelayMs}ms delay` : `${lipSyncDelayMs}ms`}
+                </span>
+              </div>
+
+              <p className="text-[10px] text-[#9898A3] leading-relaxed">
+                Matches mouth movements with audio sound. Increase if lips move before voice; decrease if lips move after voice.
+              </p>
+
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[9px] text-[#686873] font-mono whitespace-nowrap">-50ms</span>
+                <input
+                  type="range"
+                  min="-50"
+                  max="350"
+                  step="10"
+                  value={lipSyncDelayMs}
+                  onChange={(e) => setLipSyncDelayMs(Number(e.target.value))}
+                  className="flex-1 h-1.5 bg-[#111113] rounded-lg appearance-none cursor-pointer accent-[#7C3AED]"
+                />
+                <span className="text-[9px] text-[#686873] font-mono whitespace-nowrap">+350ms</span>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => setLipSyncDelayMs(120)}
+                  className={`py-1 px-1.5 rounded-lg text-[9px] font-medium border text-center transition-all ${
+                    lipSyncDelayMs === 120
+                      ? 'bg-[#7C3AED]/20 border-[#7C3AED] text-[#F5F5F7]'
+                      : 'bg-[#111113]/50 border-white/[0.04] text-[#9898A3] hover:text-[#F5F5F7]'
+                  }`}
+                  title="Optimal sync for built-in laptop and monitor speakers"
+                >
+                  Standard (120ms)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLipSyncDelayMs(200)}
+                  className={`py-1 px-1.5 rounded-lg text-[9px] font-medium border text-center transition-all ${
+                    lipSyncDelayMs === 200
+                      ? 'bg-[#7C3AED]/20 border-[#7C3AED] text-[#F5F5F7]'
+                      : 'bg-[#111113]/50 border-white/[0.04] text-[#9898A3] hover:text-[#F5F5F7]'
+                  }`}
+                  title="Compensates for extra Bluetooth headphone latency"
+                >
+                  Bluetooth (200ms)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLipSyncDelayMs(0)}
+                  className={`py-1 px-1.5 rounded-lg text-[9px] font-medium border text-center transition-all ${
+                    lipSyncDelayMs === 0
+                      ? 'bg-[#7C3AED]/20 border-[#7C3AED] text-[#F5F5F7]'
+                      : 'bg-[#111113]/50 border-white/[0.04] text-[#9898A3] hover:text-[#F5F5F7]'
+                  }`}
+                  title="Direct 0ms offset"
+                >
+                  Direct (0ms)
+                </button>
+              </div>
+            </div>
+
             {/* Cloud & AI API Keys Accordion */}
             <div className="pt-0.5">
               <button
@@ -957,7 +985,7 @@ export default function ControlPanel() {
                 className="text-[10px] text-[#686873] hover:text-[#9898A3] flex items-center gap-1.5 transition-colors"
               >
                 <Key size={11} strokeWidth={1.5} />
-                <span>{showKeyConfig ? 'Hide Cloud API Keys' : 'Configure Cloud API Keys (Groq, Gemini, Voices)'}</span>
+                <span>{showKeyConfig ? 'Hide Cloud API Keys' : 'Configure Cloud API Keys (Grok, Gemini, Voices)'}</span>
               </button>
 
               {showKeyConfig && (
@@ -966,16 +994,16 @@ export default function ControlPanel() {
                   <div className="flex items-center gap-1 p-1 bg-[#111113] rounded-lg border border-white/[0.05]">
                     <button
                       type="button"
-                      onClick={() => setActiveKeyTab('groq')}
+                      onClick={() => setActiveKeyTab('grok')}
                       className={`flex-1 py-1 text-[10px] font-medium rounded-md transition-all flex items-center justify-center gap-1 ${
-                        activeKeyTab === 'groq'
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        activeKeyTab === 'grok'
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
                           : 'text-[#9898A3] hover:text-[#F5F5F7]'
                       }`}
                     >
-                      <Flame size={10} />
-                      <span>Groq</span>
-                      {keyStatuses.groq && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                      <Sparkles size={10} />
+                      <span>Grok</span>
+                      {keyStatuses.grok && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
                     </button>
                     <button
                       type="button"
@@ -1005,40 +1033,43 @@ export default function ControlPanel() {
                     </button>
                   </div>
 
-                  {/* Groq Key Panel */}
-                  {activeKeyTab === 'groq' && (
+                  {/* Grok Key Panel */}
+                  {activeKeyTab === 'grok' && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-[#9898A3]">Groq API Key (Free)</span>
+                        <span className="text-[10px] text-[#9898A3]">xAI Grok API Key</span>
                         <a
-                          href="https://console.groq.com/keys"
+                          href="https://console.x.ai/"
                           target="_blank"
                           rel="noreferrer"
-                          className="text-[10px] text-amber-400 hover:underline flex items-center gap-1"
+                          className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"
                         >
-                          <span>Get Free Key</span>
+                          <span>Get xAI Key</span>
                           <ExternalLink size={9} />
                         </a>
                       </div>
                       <input
                         type="password"
-                        value={groqKey}
-                        onChange={(e) => setGroqKey(e.target.value)}
-                        placeholder="gsk_..."
-                        className="w-full bg-[#111113] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-[#F5F5F7] placeholder:text-[#686873] focus:outline-none focus:border-amber-500"
+                        value={grokKey}
+                        onChange={(e) => setGrokKey(e.target.value)}
+                        placeholder="xai-..."
+                        className="w-full bg-[#111113] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-[#F5F5F7] placeholder:text-[#686873] focus:outline-none focus:border-cyan-500"
                       />
                       <button
                         type="button"
                         onClick={async () => {
-                          if (typeof window !== 'undefined') localStorage.setItem('groq_api_key', groqKey);
-                          await saveAgentApiKey('groq', groqKey);
-                          setKeyStatuses(prev => ({ ...prev, groq: !!groqKey.trim() }));
-                          setKeyToastMessage('Groq Key Saved!');
+                          if (typeof window !== 'undefined') {
+                            localStorage.setItem('grok_api_key', grokKey);
+                            localStorage.setItem('xai_api_key', grokKey);
+                          }
+                          await saveAgentApiKey('grok', grokKey);
+                          setKeyStatuses(prev => ({ ...prev, grok: !!grokKey.trim() }));
+                          setKeyToastMessage('Grok Key Saved!');
                           setTimeout(() => setKeyToastMessage(null), 2500);
                         }}
-                        className="w-full py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-black text-xs font-semibold transition-all"
+                        className="w-full py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-600 text-black text-xs font-semibold transition-all"
                       >
-                        {keyToastMessage || 'Save Groq Key'}
+                        {keyToastMessage || 'Save Grok Key'}
                       </button>
                     </div>
                   )}

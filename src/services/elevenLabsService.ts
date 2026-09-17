@@ -98,16 +98,24 @@ export async function getElevenLabsVoices(): Promise<VoiceOption[]> {
 function estimateVisemesFromAlignment(characters: string[], startTimes: number[], endTimes: number[]): VisemeFrame[] {
   const visemes: VisemeFrame[] = [];
   
-  // Very rough mapping of characters to Oculus viseme IDs (0-14 approx)
+  // Accurate mapping of characters to Oculus viseme IDs (matching AZURE_VISEME_TO_OCULUS)
   const charToViseme: Record<string, number> = {
-    'a': 1, 'e': 2, 'i': 3, 'o': 4, 'u': 5,
-    'p': 21, 'b': 21, 'm': 21, // bilabial
-    'f': 18, 'v': 18, // labiodental
-    't': 19, 'd': 19, 's': 15, 'z': 15, // alveolar
-    'c': 15, 'k': 20, 'g': 20, // velar
-    'n': 19, 'r': 14, 'l': 14,
-    'w': 7, 'y': 3, 'h': 1,
-    ' ': 0 // sil
+    'a': 1,  // viseme_aa
+    'e': 4,  // viseme_E
+    'i': 6,  // viseme_I
+    'o': 3,  // viseme_O
+    'u': 7,  // viseme_U
+    'p': 21, 'b': 21, 'm': 21, // viseme_PP (bilabials)
+    'f': 18, 'v': 18,         // viseme_FF (labiodentals)
+    't': 19, 'd': 19,         // viseme_DD (alveolar stops)
+    's': 15, 'z': 15,         // viseme_SS (fricatives)
+    'c': 20, 'k': 20, 'g': 20, // viseme_kk (velars)
+    'n': 14, 'l': 14,         // viseme_nn (nasals/laterals)
+    'r': 5,                   // viseme_RR
+    'w': 7,                   // viseme_U
+    'y': 6,                   // viseme_I
+    'h': 0,                   // viseme_sil
+    ' ': 0                    // viseme_sil
   };
 
   for (let i = 0; i < characters.length; i++) {

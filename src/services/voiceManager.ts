@@ -143,20 +143,13 @@ class VoicePlaybackManager {
       store.setSpeechText(voice.sampleText || sampleGreeting);
       store.setVisemeQueue([]);
       store.setAudioUrl(voice.previewUrl);
-      store.setPlaybackState('playing');
-      store.setIsSpeaking(true);
 
-      const audio = this.audioElement || (typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null);
-      if (audio) {
-        audio.src = voice.previewUrl;
-        audio.currentTime = 0;
-        try {
-          await audio.play();
-        } catch (err) {
-          console.warn('[AUDIO PLAY] Preview playback failed:', err);
-          if (sessionId === this.currentSessionId) {
-            this.stopAll('preview_error');
-          }
+      try {
+        await this.playAudioWithSync(voice.previewUrl, sessionId);
+      } catch (err) {
+        console.warn('[AUDIO PLAY] Preview playback failed:', err);
+        if (sessionId === this.currentSessionId) {
+          this.stopAll('preview_error');
         }
       }
     } else if (voice.backend === 'azure') {
@@ -229,6 +222,77 @@ class VoicePlaybackManager {
   }
 
   /**
+   * Helper to play an HTML5 audio element with guaranteed lip-sync synchronization:
+   * 1. Keeps state as 'loading' while network fetch and buffering occur.
+   * 2. Waits for the audio element's 'playing' event (sound actually leaving speakers).
+   * 3. Sets playbackState = 'playing' and isSpeaking = true ONLY when audio actually emits sound.
+   * 4. Handles abort, errors, and session cancellations cleanly.
+   */
+  private playAudioWithSync(url: string, sessionId: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const audio = this.audioElement || (typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null);
+      if (!audio) {
+        return reject(new Error('No HTML5 audio element available'));
+      }
+
+      if (sessionId !== this.currentSessionId) {
+        return resolve();
+      }
+
+      const store = useAppStore.getState();
+      store.setPlaybackState('loading');
+      store.setIsSpeaking(false);
+
+      let settled = false;
+
+      const onPlaying = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (sessionId === this.currentSessionId) {
+          console.log(`[AUDIO PLAY] Sound started emitting (Session: ${sessionId})`);
+          store.setPlaybackState('playing');
+          store.setIsSpeaking(true);
+        }
+        resolve();
+      };
+
+      const onError = (e: any) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(e);
+      };
+
+      const cleanup = () => {
+        audio.removeEventListener('playing', onPlaying);
+        audio.removeEventListener('error', onError);
+      };
+
+      audio.addEventListener('playing', onPlaying);
+      audio.addEventListener('error', onError);
+
+      if (audio.src !== url) {
+        audio.src = url;
+      }
+      audio.currentTime = 0;
+
+      audio.play().then(() => {
+        // Fallback if 'playing' event already fired or was missed
+        if (!audio.paused && !settled) {
+          onPlaying();
+        }
+      }).catch((err) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(err);
+        }
+      });
+    });
+  }
+
+  /**
    * Synthesizes audio with Azure / Edge Neural TTS and plays natively via HTML5 Audio element.
    */
   private async playWithAzure(
@@ -249,17 +313,8 @@ class VoicePlaybackManager {
       const store = useAppStore.getState();
       store.setVisemeQueue([]);
       store.setAudioUrl(streamUrl);
-      store.setPlaybackState('playing');
-      store.setIsSpeaking(true);
 
-      const audio = this.audioElement || (typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null);
-      if (audio) {
-        audio.src = streamUrl;
-        audio.currentTime = 0;
-        await audio.play().catch((err) => {
-          console.warn('[AUDIO PLAY] Audio playback error:', err);
-        });
-      }
+      await this.playAudioWithSync(streamUrl, sessionId);
     } catch (err: any) {
       if (sessionId !== this.currentSessionId) return;
 
@@ -298,19 +353,8 @@ class VoicePlaybackManager {
         const store = useAppStore.getState();
         store.setVisemeQueue(res.visemes || []);
         store.setAudioUrl(res.audioUrl);
-        store.setPlaybackState('playing');
-        store.setIsSpeaking(true);
 
-        const audio = this.audioElement || (typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null);
-        if (audio) {
-          if (audio.src !== res.audioUrl) {
-            audio.src = res.audioUrl;
-          }
-          audio.currentTime = 0;
-          await audio.play().catch((err) => {
-            console.warn('[AUDIO PLAY] Audio element playback interrupted/failed:', err);
-          });
-        }
+        await this.playAudioWithSync(res.audioUrl, sessionId);
       } else {
         throw new Error('No audio returned from synthesis');
       }
@@ -372,6 +416,9 @@ class VoicePlaybackManager {
         this.audioElement.src = '';
       } catch {}
     }
+
+    store.setPlaybackState('loading');
+    store.setIsSpeaking(false);
 
     speakText(text, voice?.id || null, {
       rate: voice?.rate !== undefined ? voice.rate : 1.0,

@@ -13,6 +13,11 @@ export class LipSyncController {
   private isSettling: boolean = false;
   private wasSpeaking: boolean = false;
   private speechStarted: boolean = false;
+  private audioElement: HTMLAudioElement | null = null;
+  private lastAudioCurrentTime: number = 0;
+  private lastAudioPerfTime: number = 0;
+  private isAudioTracking: boolean = false;
+  private syncDelayMs: number = 120;
 
   constructor(meshes: THREE.SkinnedMesh[]) {
     this.meshes = meshes;
@@ -21,6 +26,14 @@ export class LipSyncController {
       dict = meshes[0].morphTargetDictionary;
     }
     this.morphTargetType = detectMorphTargetType(dict);
+  }
+
+  setSyncDelayMs(delay: number): void {
+    this.syncDelayMs = typeof delay === 'number' && !isNaN(delay) ? delay : 120;
+  }
+
+  getSyncDelayMs(): number {
+    return this.syncDelayMs;
   }
 
   setVisemeQueue(queue: VisemeFrame[]): void {
@@ -54,19 +67,56 @@ export class LipSyncController {
     this.speechCues = [];
     this.visemeQueue = [];
     this.speechStarted = false;
+    this.isAudioTracking = false;
     this.startSettle();
   }
 
   /**
    * Safe audio connection: keeps HTML5 <audio> playing natively to speakers
-   * without hijacking the stream into a suspended Web Audio graph.
+   * while maintaining a microsecond-accurate smooth audio playback clock.
    */
-  connectAudioElement(_audio: HTMLAudioElement): void {
-    // Keep HTML5 audio directly connected to system output for 100% reliability
+  connectAudioElement(audio: HTMLAudioElement | null): void {
+    this.audioElement = audio;
+    this.lastAudioCurrentTime = 0;
+    this.lastAudioPerfTime = 0;
+    this.isAudioTracking = false;
   }
 
   disconnectAudio(): void {
-    // Cleanup
+    this.audioElement = null;
+    this.isAudioTracking = false;
+  }
+
+  /**
+   * High-precision continuous audio clock.
+   * Browsers update audio.currentTime only at 150-250ms intervals.
+   * This interpolates between ticks using performance.now() for silky smooth lip sync.
+   */
+  private getInterpolatedAudioTimeMs(): number {
+    const audio = this.audioElement;
+    if (!audio || audio.paused || audio.ended || audio.readyState < 2) {
+      this.isAudioTracking = false;
+      return 0;
+    }
+
+    const currentAudioTime = audio.currentTime;
+    const now = performance.now();
+
+    if (!this.isAudioTracking || Math.abs(currentAudioTime - this.lastAudioCurrentTime) > 0.25) {
+      this.isAudioTracking = true;
+      this.lastAudioCurrentTime = currentAudioTime;
+      this.lastAudioPerfTime = now;
+      return Math.max(0, currentAudioTime * 1000);
+    }
+
+    if (currentAudioTime !== this.lastAudioCurrentTime) {
+      this.lastAudioCurrentTime = currentAudioTime;
+      this.lastAudioPerfTime = now;
+    }
+
+    const elapsedSec = (now - this.lastAudioPerfTime) / 1000;
+    const interpolatedSec = this.lastAudioCurrentTime + elapsedSec * (audio.playbackRate || 1.0);
+    return Math.max(0, interpolatedSec * 1000);
   }
 
   startSettle(): void {
@@ -80,14 +130,16 @@ export class LipSyncController {
     this.currentWeights = {};
     this.isSettling = false;
     this.speechStarted = false;
+    this.isAudioTracking = false;
     this.applyWeightsToMeshes();
   }
 
-  update(delta: number, audioCurrentTimeMs: number, isSpeaking: boolean): void {
+  update(delta: number, passedAudioTimeMs: number, isSpeaking: boolean): void {
     // Detect transition from speaking to not speaking
     if (this.wasSpeaking && !isSpeaking) {
       this.startSettle();
       this.speechStarted = false;
+      this.isAudioTracking = false;
     }
     this.wasSpeaking = isSpeaking;
 
@@ -112,8 +164,27 @@ export class LipSyncController {
 
     // Speaking is active
     this.speechStarted = true;
-    this.speechClockMs += delta * 1000;
-    const timeMs = audioCurrentTimeMs > 0 ? audioCurrentTimeMs : this.speechClockMs;
+
+    // 1. Determine raw playback time from interpolated audio clock or speech fallback
+    const interpolatedTime = this.getInterpolatedAudioTimeMs();
+    let rawTimeMs: number;
+
+    if (interpolatedTime > 0) {
+      rawTimeMs = interpolatedTime;
+      this.speechClockMs = rawTimeMs;
+    } else if (passedAudioTimeMs > 0) {
+      rawTimeMs = passedAudioTimeMs;
+      this.speechClockMs = rawTimeMs;
+    } else {
+      // Fallback for WebSpeech / procedural speech
+      this.speechClockMs += delta * 1000;
+      rawTimeMs = this.speechClockMs;
+    }
+
+    // 2. Apply calibrated delay offset:
+    // When the lips are too early and sound is too late, delaying the mouth position
+    // (subtracting syncDelayMs) matches the visual mouth shape to the physical sound wave!
+    const timeMs = Math.max(0, rawTimeMs - this.syncDelayMs);
 
     let targetWeights: Record<string, number> = {};
 

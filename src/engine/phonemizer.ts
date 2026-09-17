@@ -198,7 +198,7 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
   if (!text || !text.trim()) return cues;
 
   const VOWEL_PHONEMES = ['AA','AE','AH','AO','AW','AY','EH','ER','EY','IH','IY','OW','OY','UH','UW'];
-  let currentTimeMs = 50; // brief initial settle pause
+  let currentTimeMs = 130; // Natural acoustic speech onset lead-in
 
   const regex = /(\S+)/g;
   let match: RegExpExecArray | null;
@@ -216,8 +216,8 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
       phonemes = ['AH'];
     }
 
-    // Dynamic word duration based on character count and phonemes
-    const baseDuration = Math.max(220, Math.min(650, (rawWord.length * 48 + 140) / rate));
+    // Dynamic word duration calibrated to natural 150-160 WPM neural speech cadence
+    const baseDuration = Math.max(240, Math.min(680, (rawWord.length * 52 + 150) / rate));
     const timings = estimatePhonemeTimings(phonemes, baseDuration);
 
     for (const t of timings) {

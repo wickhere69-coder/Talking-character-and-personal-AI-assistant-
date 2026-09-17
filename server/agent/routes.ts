@@ -102,7 +102,7 @@ export function createAgentRouter(): Router {
     });
   });
 
-  // 8. Key Configuration (Groq, Gemini, ElevenLabs)
+  // 8. Key Configuration (Grok, Gemini, ElevenLabs)
   router.post('/save-key', (req, res) => {
     const { provider, apiKey } = req.body;
     if (!provider || typeof apiKey !== 'string') {
@@ -110,8 +110,8 @@ export function createAgentRouter(): Router {
     }
 
     const trimmedKey = apiKey.trim();
-    const envVarName = provider === 'groq'
-      ? 'GROQ_API_KEY'
+    const envVarName = (provider === 'grok' || provider === 'xai')
+      ? 'GROK_API_KEY'
       : provider === 'gemini'
       ? 'GEMINI_API_KEY'
       : provider === 'elevenlabs'
@@ -119,11 +119,14 @@ export function createAgentRouter(): Router {
       : null;
 
     if (!envVarName) {
-      return res.status(400).json({ error: `Unsupported provider "${provider}". Supported: groq, gemini, elevenlabs.` });
+      return res.status(400).json({ error: `Unsupported provider "${provider}". Supported: grok, gemini, elevenlabs.` });
     }
 
     process.env[envVarName] = trimmedKey;
-    agent.getProviderManager().setProviderKey(provider, trimmedKey);
+    if (envVarName === 'GROK_API_KEY') {
+      process.env.XAI_API_KEY = trimmedKey;
+    }
+    agent.getProviderManager().setProviderKey(provider === 'xai' ? 'grok' : provider, trimmedKey);
 
     // Persist to .env file
     try {
@@ -134,6 +137,14 @@ export function createAgentRouter(): Router {
         envContent = envContent.replace(regex, `${envVarName}=${trimmedKey}`);
       } else {
         envContent += `\n${envVarName}=${trimmedKey}\n`;
+      }
+      if (envVarName === 'GROK_API_KEY') {
+        const xaiRegex = /^XAI_API_KEY=.*$/m;
+        if (xaiRegex.test(envContent)) {
+          envContent = envContent.replace(xaiRegex, `XAI_API_KEY=${trimmedKey}`);
+        } else {
+          envContent += `\nXAI_API_KEY=${trimmedKey}\n`;
+        }
       }
       fs.writeFileSync(envPath, envContent);
     } catch (e: any) {
@@ -146,7 +157,7 @@ export function createAgentRouter(): Router {
   // 9. Key Status
   router.get('/key-status', (req, res) => {
     res.json({
-      groq: !!(process.env.GROQ_API_KEY?.trim()),
+      grok: !!(process.env.GROK_API_KEY?.trim() || process.env.XAI_API_KEY?.trim()),
       gemini: !!(process.env.GEMINI_API_KEY?.trim()),
       elevenlabs: !!(process.env.ELEVENLABS_API_KEY?.trim())
     });
