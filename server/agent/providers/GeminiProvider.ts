@@ -6,11 +6,13 @@ export class GeminiProvider implements IAIProvider {
   private baseUrl: string;
   private defaultModel: string;
   private apiKey: string;
+  private cachedAvailable: boolean | null = null;
+  private cacheExpiry: number = 0;
 
   constructor(
     apiKey = process.env.GEMINI_API_KEY || '',
     baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+    defaultModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
   ) {
     this.apiKey = apiKey.trim();
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -27,18 +29,31 @@ export class GeminiProvider implements IAIProvider {
 
   setApiKey(key: string): void {
     this.apiKey = key.trim();
+    this.cachedAvailable = null;
+    this.cacheExpiry = 0;
   }
 
   async isAvailable(): Promise<boolean> {
     const key = this.getApiKey();
     if (!key) return false;
+    
+    // Return cached availability if valid (TTL: 60s)
+    const now = Date.now();
+    if (this.cachedAvailable !== null && now < this.cacheExpiry) {
+      return this.cachedAvailable;
+    }
+
     try {
       const res = await axios.get(`${this.baseUrl}/models`, {
         headers: { Authorization: `Bearer ${key}` },
-        timeout: 3500
+        timeout: 1800
       });
-      return res.status === 200;
+      this.cachedAvailable = res.status === 200;
+      this.cacheExpiry = now + 60000;
+      return this.cachedAvailable;
     } catch {
+      this.cachedAvailable = false;
+      this.cacheExpiry = now + 15000;
       return false;
     }
   }
@@ -63,12 +78,12 @@ export class GeminiProvider implements IAIProvider {
 
       const chosen = cleanModels.includes(this.defaultModel)
         ? this.defaultModel
-        : cleanModels.find((m: string) => m.includes('gemini-3.8') || m.includes('gemini-3.6') || m.includes('gemini-3.5')) || this.defaultModel;
+        : cleanModels.find((m: string) => m.includes('2.0-flash') || m.includes('1.5-flash')) || 'gemini-2.0-flash';
 
       return {
         name: chosen,
         available: true,
-        details: `Google Gemini Cloud: ${chosen} (High-speed multimodal intelligence)`
+        details: `Google Gemini Cloud: ${chosen} (Ultra-fast flash intelligence)`
       };
     } catch (err: any) {
       return {
@@ -155,7 +170,7 @@ export class GeminiProvider implements IAIProvider {
       model,
       messages: formattedMessages,
       temperature: config.temperature ?? 0.7,
-      max_tokens: 1024
+      max_tokens: 350
     };
 
     if (formattedTools.length > 0 && config.toolsEnabled !== false) {
@@ -170,20 +185,20 @@ export class GeminiProvider implements IAIProvider {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json'
         },
-        timeout: 20000
+        timeout: 2500
       });
     } catch (err: any) {
       const status = err.response?.status;
-      if ((status === 404 || status === 503) && payload.model !== 'gemini-3.6-flash') {
-        console.warn(`Model ${payload.model} unavailable (${status}), falling back to gemini-3.6-flash`);
-        this.defaultModel = 'gemini-3.6-flash';
-        payload.model = 'gemini-3.6-flash';
+      if ((status === 404 || status === 400 || status === 503) && payload.model !== 'gemini-1.5-flash') {
+        console.warn(`Model ${payload.model} failed (${status}), falling back to gemini-1.5-flash`);
+        this.defaultModel = 'gemini-1.5-flash';
+        payload.model = 'gemini-1.5-flash';
         res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
           headers: {
             Authorization: `Bearer ${key}`,
             'Content-Type': 'application/json'
           },
-          timeout: 20000
+          timeout: 2200
         });
       } else {
         throw err;

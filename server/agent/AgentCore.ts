@@ -19,23 +19,20 @@ import { ContextManager } from './memory/ContextManager';
 import { PermissionManager } from './permissions/PermissionManager';
 
 function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], providerName?: string): ToolDefinition[] {
-  // Groq and Gemini cloud models have large context windows and native function calling
-  if (providerName === 'groq' || providerName === 'gemini') {
-    return allTools;
+  const lower = userMessage.toLowerCase().trim();
+
+  // Fast check: common greetings and direct conversation need zero tools
+  const commonChat = ['hello', 'hi', 'hey', 'how are you', 'what is your name', 'who are you', 'tell me a joke', 'good morning', 'good evening', 'thank you', 'thanks', 'bye'];
+  if (commonChat.some(c => lower === c || lower.startsWith(c + ' ') || lower.endsWith(' ' + c))) {
+    return [];
   }
 
-  const lower = userMessage.toLowerCase();
-
-  const fileKeywords = ['file', 'files', 'folder', 'directory', 'dir', 'package.json', 'readme', 'read', 'write', 'create file', 'delete file', 'search code', 'project', 'code'];
-  const sysKeywords = ['system', 'cpu', 'ram', 'memory', 'resource', 'specs', 'calc', 'calculator', 'notepad', 'open app', 'run command', 'terminal'];
-  const taskKeywords = ['task', 'tasks', 'todo', 'to-do', 'note', 'notes', 'reminder', 'remind'];
-  const memoryKeywords = ['remember', 'recall', 'favorite', 'my name', 'what did i tell', 'preference'];
-  const weatherKeywords = ['weather', 'forecast', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'humidity', 'predict', 'storm', 'celsius', 'fahrenheit', 'hot', 'cold', 'umbrella', 'climate'];
-  const webKeywords = [
-    'search', 'browse', 'lookup', 'google', 'fetch', 'http', 'who', 'what', 'when',
-    'where', 'why', 'how', 'is', 'are', 'was', 'news', 'current', 'latest', 'today',
-    'president', 'score', 'update', 'price', 'release', 'year', 'tell me about', 'know about'
-  ];
+  const fileKeywords = ['file', 'files', 'folder', 'directory', 'dir', 'package.json', 'readme', 'read file', 'write file', 'create file', 'delete file', 'search code', 'inspect code'];
+  const sysKeywords = ['cpu', 'ram', 'memory usage', 'specs', 'calculator', 'open app', 'run command', 'terminal', 'powershell'];
+  const taskKeywords = ['add task', 'list tasks', 'todo', 'to-do', 'complete task', 'add note', 'list notes', 'delete note'];
+  const memoryKeywords = ['remember that', 'remember my', 'recall my', 'what did i tell you', 'my favorite'];
+  const weatherKeywords = ['weather', 'forecast', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'humidity', 'predict weather', 'storm', 'celsius', 'fahrenheit'];
+  const webKeywords = ['search the web', 'search google', 'lookup online', 'browse web', 'latest news', 'current price of', 'breaking news'];
 
   const matchedTools = new Set<string>();
 
@@ -58,12 +55,7 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
     ['web_search', 'fetch_webpage'].forEach(t => matchedTools.add(t));
   }
 
-  // Always include web_search, weather prediction, and memory as baseline tools for intelligent agents
-  matchedTools.add('predict_weather');
-  matchedTools.add('web_search');
-  matchedTools.add('remember_info');
-  matchedTools.add('recall_info');
-
+  // If no specific tools matched, don't burden the model with schemas (enables <0.5s answers)
   return allTools.filter(t => matchedTools.has(t.name));
 }
 
@@ -118,7 +110,7 @@ export class AgentCore {
     config: AgentConfig = {}
   ): Promise<AgentChatResponse> {
     const isChatMode = config.mode === 'chat';
-    const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 2);
+    const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 1);
     if (isChatMode) {
       config.toolsEnabled = false;
     }

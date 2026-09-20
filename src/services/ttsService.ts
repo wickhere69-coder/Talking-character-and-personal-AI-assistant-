@@ -101,8 +101,11 @@ export async function loadVoices(backend: TtsBackend): Promise<VoiceOption[]> {
 }
 
 export async function loadAllCuratedVoices(): Promise<VoiceOption[]> {
-  const neuralVoices = await loadVoices('azure');
-  return neuralVoices;
+  const [neuralVoices, webVoices] = await Promise.all([
+    loadVoices('azure'),
+    loadVoices('webSpeech')
+  ]);
+  return [...neuralVoices, ...webVoices];
 }
 
 export async function synthesize(text: string, voice: string, backend: TtsBackend, apiKey?: string, modelId?: string, signal?: AbortSignal): Promise<SynthesisResult | null> {

@@ -167,7 +167,8 @@ class VoicePlaybackManager {
   public async speak(
     rawText: string,
     activeVoice?: VoiceOption | null,
-    elevenLabsApiKey?: string
+    elevenLabsApiKey?: string,
+    forceInstant: boolean = false
   ): Promise<void> {
     const text = rawText?.trim();
     if (!text) return;
@@ -186,7 +187,7 @@ class VoicePlaybackManager {
     this.stopAll('new_speech_request');
     const sessionId = this.currentSessionId;
 
-    console.log(`[TTS REQUEST] Session ${sessionId} initiating for: "${text.substring(0, 60)}..."`);
+    console.log(`[TTS REQUEST] Session ${sessionId} initiating (instant=${forceInstant}) for: "${text.substring(0, 60)}..."`);
 
     const store = useAppStore.getState();
     store.setSpeechText(text);
@@ -208,6 +209,12 @@ class VoicePlaybackManager {
         backend: 'azure',
         gender: 'female'
       };
+
+    // Instant fast path (e.g. Repeat Mode or instant speed): uses 0ms network latency browser speech
+    if (forceInstant || voice.backend === 'webSpeech') {
+      this.playWithWebSpeech(text, voice, sessionId);
+      return;
+    }
 
     const isElevenLabs = voice.backend === 'elevenlabs';
     const isAzure = voice.backend === 'azure';

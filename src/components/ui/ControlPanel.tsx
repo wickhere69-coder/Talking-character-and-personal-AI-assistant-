@@ -196,7 +196,7 @@ export default function ControlPanel() {
       .trim();
   };
 
-  const speakAndSync = useCallback(async (textToSpeak: string) => {
+  const speakAndSync = useCallback(async (textToSpeak: string, isInstantRepeat: boolean = false) => {
     const cleaned = cleanTextForSpeech(textToSpeak);
     if (!cleaned) return;
 
@@ -213,7 +213,7 @@ export default function ControlPanel() {
       || store.voices.find(v => v.backend === 'azure')
       || store.voices[0];
     const key = elevenLabsKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');
-    await voiceManager.speak(cleaned, activeVoice, key);
+    await voiceManager.speak(cleaned, activeVoice, key, isInstantRepeat);
   }, [elevenLabsKey, stopListening]);
 
   // Main Agent Ask Handler
@@ -241,34 +241,7 @@ export default function ControlPanel() {
     setCurrentAgentAction(null);
     setPlaybackState('loading');
     setError(null);
-
-    let stepTimer: any = null;
-    // Multi-step task display placeholder for tool queries
-    if (agentModeType === 'agent') {
-      setActiveTaskSteps([
-        { title: 'Analyze user prompt', status: 'in_progress' },
-        { title: 'Evaluate local capabilities & tools', status: 'pending' },
-        { title: 'Synthesize spoken response', status: 'pending' }
-      ]);
-
-      let stepCounter = 0;
-      stepTimer = setInterval(() => {
-        stepCounter++;
-        if (stepCounter === 1) {
-          setActiveTaskSteps([
-            { title: 'Analyze user prompt', status: 'completed' },
-            { title: 'Evaluate local capabilities & tools', status: 'in_progress' },
-            { title: 'Synthesize spoken response', status: 'pending' }
-          ]);
-        } else if (stepCounter === 2) {
-          setActiveTaskSteps([
-            { title: 'Analyze user prompt', status: 'completed' },
-            { title: 'Evaluate local capabilities & tools', status: 'completed' },
-            { title: 'Synthesize spoken response', status: 'in_progress' }
-          ]);
-        }
-      }, 250);
-    }
+    setActiveTaskSteps([{ title: 'Processing answer...', status: 'in_progress' }]);
 
     try {
       const providerMapping = agentSpeed === 'instant' ? 'local_fallback' : agentSpeed;
@@ -327,7 +300,6 @@ export default function ControlPanel() {
       setActiveTaskSteps([]);
       await speakAndSync(`I encountered an issue processing your request: ${err?.message || 'Unknown error'}`);
     } finally {
-      if (stepTimer) clearInterval(stepTimer);
       isAskingRef.current = false;
     }
   }, [agentModeType, agentSpeed, setAgentStatus, setCurrentAgentAction, setPlaybackState, setError, setActiveTaskSteps, setAgentModelName, setPendingConfirmation, setScriptText, setLastFullResponse, speakAndSync, stopListening]);
@@ -360,8 +332,8 @@ export default function ControlPanel() {
         }
 
         const isRepeat = useAppStore.getState().agentModeType === 'repeat';
-        // Ultra-fast responsiveness: 120ms on isFinal in repeat mode (near-instantaneous!), 350ms on interim pause.
-        const delay = isRepeat ? (isFinal ? 120 : 350) : (isFinal ? 250 : 650);
+        // Ultra-fast responsiveness: 80ms on isFinal in repeat mode (sub-second repeat!), 200ms on interim pause.
+        const delay = isRepeat ? (isFinal ? 80 : 200) : (isFinal ? 180 : 450);
 
         silenceTimerRef.current = setTimeout(async () => {
           stopListening();
@@ -369,7 +341,7 @@ export default function ControlPanel() {
           accumulated = '';
           if (toProcess) {
             if (isRepeat) {
-              await speakAndSync(toProcess);
+              await speakAndSync(toProcess, true);
             } else {
               await handleAskAgent(toProcess);
             }
@@ -420,7 +392,7 @@ export default function ControlPanel() {
       voiceManager.stopAll('user_pause');
       setPlaybackState('paused');
     } else {
-      speakAndSync(scriptText);
+      speakAndSync(scriptText, agentModeType === 'repeat');
     }
   };
 
@@ -679,7 +651,7 @@ export default function ControlPanel() {
                     if (scriptText.trim() && playbackState !== 'loading') {
                       stopListening();
                       if (agentModeType === 'repeat') {
-                        speakAndSync(scriptText);
+                        speakAndSync(scriptText, true);
                       } else {
                         handleAskAgent(scriptText);
                       }
@@ -738,7 +710,7 @@ export default function ControlPanel() {
                       if (scriptText.trim() && playbackState !== 'loading') {
                         stopListening();
                         if (agentModeType === 'repeat') {
-                          speakAndSync(scriptText);
+                          speakAndSync(scriptText, true);
                         } else {
                           handleAskAgent(scriptText);
                         }

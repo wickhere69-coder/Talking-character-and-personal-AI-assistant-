@@ -6,15 +6,18 @@ export class GrokProvider implements IAIProvider {
   private baseUrl: string;
   private defaultModel: string;
   private apiKey: string;
+  private cachedAvailable: boolean | null = null;
+  private cacheExpiry: number = 0;
 
   constructor(
-    apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '',
-    baseUrl = process.env.GROK_BASE_URL || 'https://api.x.ai/v1',
-    defaultModel = process.env.GROK_MODEL || 'grok-4.6'
+    apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || process.env.GROQ_API_KEY || '',
+    baseUrl = process.env.GROK_BASE_URL || '',
+    defaultModel = process.env.GROK_MODEL || ''
   ) {
     this.apiKey = apiKey.trim();
-    this.baseUrl = baseUrl.replace(/\/$/, '');
-    this.defaultModel = defaultModel;
+    const isGroq = this.apiKey.startsWith('gsk_') || !!process.env.GROQ_API_KEY;
+    this.baseUrl = baseUrl.replace(/\/$/, '') || (isGroq ? 'https://api.groq.com/openai/v1' : 'https://api.x.ai/v1');
+    this.defaultModel = defaultModel || (isGroq ? 'llama-3.3-70b-versatile' : 'grok-2-latest');
   }
 
   getName(): string {
@@ -22,23 +25,40 @@ export class GrokProvider implements IAIProvider {
   }
 
   getApiKey(): string {
-    return this.apiKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+    return this.apiKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY || process.env.GROQ_API_KEY || '';
   }
 
   setApiKey(key: string): void {
     this.apiKey = key.trim();
+    const isGroq = this.apiKey.startsWith('gsk_');
+    if (isGroq && !this.baseUrl.includes('groq')) {
+      this.baseUrl = 'https://api.groq.com/openai/v1';
+      this.defaultModel = 'llama-3.3-70b-versatile';
+    }
+    this.cachedAvailable = null;
+    this.cacheExpiry = 0;
   }
 
   async isAvailable(): Promise<boolean> {
     const key = this.getApiKey();
     if (!key) return false;
+
+    const now = Date.now();
+    if (this.cachedAvailable !== null && now < this.cacheExpiry) {
+      return this.cachedAvailable;
+    }
+
     try {
       const res = await axios.get(`${this.baseUrl}/models`, {
         headers: { Authorization: `Bearer ${key}` },
-        timeout: 4000
+        timeout: 1800
       });
-      return res.status === 200;
+      this.cachedAvailable = res.status === 200;
+      this.cacheExpiry = now + 60000;
+      return this.cachedAvailable;
     } catch {
+      this.cachedAvailable = false;
+      this.cacheExpiry = now + 15000;
       return false;
     }
   }
@@ -148,7 +168,8 @@ export class GrokProvider implements IAIProvider {
     const payload: any = {
       model,
       messages: formattedMessages,
-      temperature: config.temperature ?? 0.7
+      temperature: config.temperature ?? 0.7,
+      max_tokens: 350
     };
 
     if (formattedTools.length > 0) {
@@ -162,7 +183,7 @@ export class GrokProvider implements IAIProvider {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json'
         },
-        timeout: 30000
+        timeout: 2500
       });
 
       const choice = res.data?.choices?.[0];
@@ -196,8 +217,7 @@ export class GrokProvider implements IAIProvider {
 
       return {
         content,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        tokensUsed: res.data?.usage?.total_tokens
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined
       };
     } catch (err: any) {
       const apiError = err.response?.data?.error?.message || err.response?.data?.message || err.message;
