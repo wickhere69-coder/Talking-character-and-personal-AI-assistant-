@@ -272,63 +272,122 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
   const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   if (!SpeechRec) return null;
 
-  const recognition = new SpeechRec();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = 'en-US';
-
   let active = false;
+  let recognition: any = null;
+  let baseTranscript = '';
+  let sessionFinalTranscript = '';
+  let restartTimeout: any = null;
 
-  recognition.onresult = (event: any) => {
-    if (!active) return; // Completely ignore trailing results after stop or abort
+  const initRecognition = () => {
+    if (recognition) {
+      try {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.abort();
+      } catch {}
+    }
 
-    let interim = '';
-    let final = '';
+    recognition = new SpeechRec();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) {
-        final += event.results[i][0].transcript;
-      } else {
-        interim += event.results[i][0].transcript;
+    recognition.onresult = (event: any) => {
+      if (!active) return;
+
+      let currentFinal = '';
+      let currentInterim = '';
+
+      for (let i = 0; i < event.results.length; ++i) {
+        const res = event.results[i];
+        if (res.isFinal) {
+          currentFinal += res[0].transcript + ' ';
+        } else {
+          currentInterim += res[0].transcript;
+        }
       }
-    }
 
-    const text = (final || interim).trim();
-    if (text && active) {
-      handlers.onTranscript(text, !!final);
-    }
-  };
+      sessionFinalTranscript = currentFinal;
+      const fullText = (baseTranscript + currentFinal + currentInterim).trim();
+      if (fullText && active) {
+        const isLastFinal = event.results[event.results.length - 1]?.isFinal ?? false;
+        handlers.onTranscript(fullText, isLastFinal);
+      }
+    };
 
-  recognition.onerror = (event: any) => {
-    if (!active) return;
-    if (event.error !== 'no-speech') {
+    recognition.onerror = (event: any) => {
+      if (!active) return;
+      if (event.error === 'no-speech') {
+        // Expected browser silence timeout, keep listening if active
+        return;
+      }
+      if (event.error === 'aborted') {
+        return;
+      }
       handlers.onError(event.error);
-    }
+    };
+
+    recognition.onend = () => {
+      if (!active) {
+        handlers.onEnd();
+        return;
+      }
+
+      // If browser unexpectedly ends the session while user is still speaking (e.g. Chrome's internal 15s limit),
+      // merge finalized text into baseTranscript and cleanly restart recognition without cutting off speech.
+      baseTranscript = (baseTranscript + sessionFinalTranscript).trim() + (sessionFinalTranscript ? ' ' : '');
+      sessionFinalTranscript = '';
+
+      if (restartTimeout) clearTimeout(restartTimeout);
+      restartTimeout = setTimeout(() => {
+        if (active) {
+          try {
+            recognition.start();
+          } catch {
+            try {
+              initRecognition();
+              recognition.start();
+            } catch {
+              active = false;
+              handlers.onEnd();
+            }
+          }
+        }
+      }, 50);
+    };
   };
 
-  recognition.onend = () => {
-    if (!active) return;
-    active = false;
-    handlers.onEnd();
-  };
+  initRecognition();
 
   return {
     start: () => {
       active = true;
+      baseTranscript = '';
+      sessionFinalTranscript = '';
       try {
         recognition.start();
-      } catch (err) {
-        active = false;
-        throw err;
+      } catch {
+        try {
+          initRecognition();
+          recognition.start();
+        } catch (err) {
+          active = false;
+          throw err;
+        }
       }
     },
     stop: () => {
       active = false;
+      if (restartTimeout) clearTimeout(restartTimeout);
       try { recognition.stop(); } catch {}
+      handlers.onEnd();
     },
     abort: () => {
       active = false;
+      if (restartTimeout) clearTimeout(restartTimeout);
       try { recognition.abort(); } catch {}
+      handlers.onEnd();
     },
     isActive: () => active
   };

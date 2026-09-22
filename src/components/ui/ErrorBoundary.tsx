@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { TYPO, BUTTONS } from './designSystem';
 import { AlertCircle } from 'lucide-react';
 
 interface Props {
@@ -32,19 +33,24 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0a0a0f] p-6 z-50 text-center">
-          <div className="max-w-md bg-[#111113] border border-rose-500/30 rounded-2xl p-6 shadow-2xl">
-            <AlertCircle size={32} strokeWidth={1.5} className="text-rose-400 mb-3 mx-auto" />
-            <h2 className="text-lg font-semibold text-[#F5F5F7] mb-2">3D Scene Error</h2>
-            <p className="text-xs text-[#9898A3] mb-4">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#09090B] p-6 z-50 text-center">
+          <div className="max-w-md w-full bg-[#0F0F12] border border-rose-500/20 rounded-2xl p-6 shadow-[0_24px_48px_rgba(0,0,0,0.7)] flex flex-col items-center">
+            <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-3.5">
+              <AlertCircle size={24} strokeWidth={1.5} className="text-rose-400" />
+            </div>
+            <h2 className={`${TYPO.title} mb-1.5`}>
+              3D Scene Error
+            </h2>
+            <p className="text-[13px] text-white/70 leading-relaxed mb-5 max-w-sm">
               {this.state.error?.message || 'An error occurred while loading the 3D character scene.'}
             </p>
             <button
+              type="button"
               onClick={() => {
                 this.setState({ hasError: false, error: null });
                 window.location.reload();
               }}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
+              className={`px-5 py-2.5 ${BUTTONS.primary} text-xs`}
             >
               Reload Scene
             </button>

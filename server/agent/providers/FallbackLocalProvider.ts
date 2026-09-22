@@ -504,7 +504,9 @@ export class FallbackLocalProvider implements IAIProvider {
     const searchTriggers = [
       'search web', 'google', 'look up', 'search online', 'browse',
       'who is', "who's", 'what is the latest', 'what is current', 'news about',
-      'president of', 'prime minister', 'latest about', 'tell me about'
+      'president of', 'prime minister', 'latest about', 'tell me about',
+      'news', 'current events', 'recent events', 'explain how', 'what happened',
+      'breakthrough', 'who won'
     ];
     if (searchTriggers.some((trigger) => lower.includes(trigger))) {
       const query = userText
@@ -526,7 +528,7 @@ export class FallbackLocalProvider implements IAIProvider {
 
     // ── 13. Smart Direct Conversational Response ──
     return {
-      content: `I'm right here! You asked: "${userText}". I can check system stats, look up information, manage your tasks, or explore your workspace files. What would you like to do next?`
+      content: `I'm right here! You asked: "${userText}". I'm ready to answer your questions, explore any topic, search the live web, or manage tasks. What would you like to explore next?`
     };
   }
 }

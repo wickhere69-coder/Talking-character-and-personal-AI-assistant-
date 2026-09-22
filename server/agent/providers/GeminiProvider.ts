@@ -12,7 +12,7 @@ export class GeminiProvider implements IAIProvider {
   constructor(
     apiKey = process.env.GEMINI_API_KEY || '',
     baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+    defaultModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
   ) {
     this.apiKey = apiKey.trim();
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -46,7 +46,7 @@ export class GeminiProvider implements IAIProvider {
     try {
       const res = await axios.get(`${this.baseUrl}/models`, {
         headers: { Authorization: `Bearer ${key}` },
-        timeout: 1800
+        timeout: 5000
       });
       this.cachedAvailable = res.status === 200;
       this.cacheExpiry = now + 60000;
@@ -71,14 +71,14 @@ export class GeminiProvider implements IAIProvider {
     try {
       const res = await axios.get(`${this.baseUrl}/models`, {
         headers: { Authorization: `Bearer ${key}` },
-        timeout: 3500
+        timeout: 6000
       });
       const rawModels = (res.data?.data || []).map((m: any) => m.id);
       const cleanModels = rawModels.map((id: string) => id.replace(/^models\//, ''));
 
       const chosen = cleanModels.includes(this.defaultModel)
         ? this.defaultModel
-        : cleanModels.find((m: string) => m.includes('2.0-flash') || m.includes('1.5-flash')) || 'gemini-2.0-flash';
+        : cleanModels.find((m: string) => m.includes('3.8-flash') || m.includes('3.6-flash') || m.includes('2.5-flash')) || 'gemini-3.8-flash';
 
       return {
         name: chosen,
@@ -138,39 +138,34 @@ export class GeminiProvider implements IAIProvider {
       };
     });
 
-    // Format messages for OpenAI compatibility
-    const formattedMessages = messages.map((m) => {
-      const base: any = {
-        role: m.role,
-        content: m.content || ''
-      };
-      if (m.toolCalls && m.toolCalls.length > 0) {
-        base.tool_calls = m.toolCalls.map((tc) => {
-          const item: any = {
-            id: tc.id,
-            type: 'function',
-            function: {
-              name: tc.name,
-              arguments: JSON.stringify(tc.arguments)
-            }
-          };
-          if (tc.extraContent) {
-            item.extra_content = tc.extraContent;
-          }
-          return item;
+    // Format messages for Gemini OpenAI-compatible endpoint
+    const formattedMessages: any[] = [];
+    for (const m of messages) {
+      if (m.role === 'tool') {
+        formattedMessages.push({
+          role: 'user',
+          content: `[Information Retrieved]:\n${m.content || ''}\n\nPlease synthesize this into a full, natural, and articulate spoken answer.`
+        });
+      } else if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && !m.content) {
+        formattedMessages.push({
+          role: 'assistant',
+          content: 'Let me look that up for you right now.'
+        });
+      } else {
+        formattedMessages.push({
+          role: m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user'),
+          content: m.content || ''
         });
       }
-      if (m.role === 'tool' && m.toolCallId) {
-        base.tool_call_id = m.toolCallId;
-      }
-      return base;
-    });
+    }
+
+    const modelToUse = model.startsWith('models/') ? model : `models/${model}`;
 
     const payload: any = {
-      model,
+      model: modelToUse,
       messages: formattedMessages,
       temperature: config.temperature ?? 0.7,
-      max_tokens: 350
+      max_tokens: config.maxTokens || 2048
     };
 
     if (formattedTools.length > 0 && config.toolsEnabled !== false) {
@@ -185,22 +180,36 @@ export class GeminiProvider implements IAIProvider {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json'
         },
-        timeout: 2500
+        timeout: 14000
       });
     } catch (err: any) {
-      const status = err.response?.status;
-      if ((status === 404 || status === 400 || status === 503) && payload.model !== 'gemini-1.5-flash') {
-        console.warn(`Model ${payload.model} failed (${status}), falling back to gemini-1.5-flash`);
-        this.defaultModel = 'gemini-1.5-flash';
-        payload.model = 'gemini-1.5-flash';
-        res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
-          headers: {
-            Authorization: `Bearer ${key}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 2200
-        });
-      } else {
+      const fallbackCandidates = [
+        'models/gemini-3.8-flash',
+        'models/gemini-3.5-flash-lite',
+        'models/gemini-3.1-flash-lite',
+        'models/gemini-3-flash-preview',
+        'models/gemini-3.7-flash',
+        'models/gemini-3.6-flash'
+      ].filter((m) => m !== payload.model);
+
+      let succeeded = false;
+      for (const altModel of fallbackCandidates) {
+        try {
+          payload.model = altModel;
+          res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
+            headers: {
+              Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 12000
+          });
+          this.defaultModel = altModel;
+          succeeded = true;
+          break;
+        } catch {}
+      }
+
+      if (!succeeded) {
         throw err;
       }
     }

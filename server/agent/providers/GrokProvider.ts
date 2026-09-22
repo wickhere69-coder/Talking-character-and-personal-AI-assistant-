@@ -31,9 +31,12 @@ export class GrokProvider implements IAIProvider {
   setApiKey(key: string): void {
     this.apiKey = key.trim();
     const isGroq = this.apiKey.startsWith('gsk_');
-    if (isGroq && !this.baseUrl.includes('groq')) {
+    if (isGroq) {
       this.baseUrl = 'https://api.groq.com/openai/v1';
       this.defaultModel = 'llama-3.3-70b-versatile';
+    } else {
+      this.baseUrl = 'https://api.x.ai/v1';
+      this.defaultModel = 'grok-2-latest';
     }
     this.cachedAvailable = null;
     this.cacheExpiry = 0;
@@ -51,7 +54,7 @@ export class GrokProvider implements IAIProvider {
     try {
       const res = await axios.get(`${this.baseUrl}/models`, {
         headers: { Authorization: `Bearer ${key}` },
-        timeout: 1800
+        timeout: 5000
       });
       this.cachedAvailable = res.status === 200;
       this.cacheExpiry = now + 60000;
@@ -169,7 +172,7 @@ export class GrokProvider implements IAIProvider {
       model,
       messages: formattedMessages,
       temperature: config.temperature ?? 0.7,
-      max_tokens: 350
+      max_tokens: config.maxTokens || 2048
     };
 
     if (formattedTools.length > 0) {
@@ -183,7 +186,7 @@ export class GrokProvider implements IAIProvider {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json'
         },
-        timeout: 2500
+        timeout: 25000
       });
 
       const choice = res.data?.choices?.[0];

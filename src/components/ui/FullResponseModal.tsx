@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore } from '@/store/appStore';
+import { TYPO, BUTTONS, SURFACES } from './designSystem';
 import { X, FileText } from 'lucide-react';
 
 export default function FullResponseModal() {
@@ -8,22 +9,22 @@ export default function FullResponseModal() {
   if (!isFullResponseModalOpen || !lastFullResponse) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in">
-      <div 
-        className="w-full max-w-2xl bg-[#111113]/95 border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-fade-in">
+      <div
+        className={`w-full max-w-2xl ${SURFACES.modalShell} overflow-hidden flex flex-col max-h-[80vh]`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-[#151518]/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-[#0F0F12]">
           <div className="flex items-center gap-2.5">
             <FileText size={16} strokeWidth={1.5} className="text-[#8B5CF6]" />
-            <h2 className="text-sm font-semibold text-[#F5F5F7] tracking-wide uppercase">
+            <h2 className={TYPO.title}>
               Full AI Assistant Response
             </h2>
           </div>
           <button
             type="button"
             onClick={() => setIsFullResponseModalOpen(false)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#9898A3] hover:text-[#F5F5F7] hover:bg-white/[0.06] transition-all"
+            className={BUTTONS.icon}
             title="Close modal"
           >
             <X size={15} strokeWidth={1.5} />
@@ -31,16 +32,16 @@ export default function FullResponseModal() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-          <div className="text-sm text-[#F5F5F7]/90 leading-relaxed select-text whitespace-pre-wrap font-sans">
+          <div className="text-[13px] text-white/80 leading-relaxed select-text whitespace-pre-wrap font-sans">
             {lastFullResponse}
           </div>
         </div>
 
-        <div className="px-6 py-3 border-t border-white/[0.06] bg-[#151518]/50 flex items-center justify-end">
+        <div className="px-6 py-3 border-t border-white/[0.06] bg-[#0F0F12] flex items-center justify-end">
           <button
             type="button"
             onClick={() => setIsFullResponseModalOpen(false)}
-            className="px-4 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-[#F5F5F7] text-xs font-medium transition-all"
+            className={`px-4 py-1.5 text-xs ${BUTTONS.secondary}`}
           >
             Close
           </button>

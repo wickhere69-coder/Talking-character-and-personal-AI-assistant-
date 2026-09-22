@@ -28,11 +28,23 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
   }
 
   const fileKeywords = ['file', 'files', 'folder', 'directory', 'dir', 'package.json', 'readme', 'read file', 'write file', 'create file', 'delete file', 'search code', 'inspect code'];
-  const sysKeywords = ['cpu', 'ram', 'memory usage', 'specs', 'calculator', 'open app', 'run command', 'terminal', 'powershell'];
+  // Host OS/Hardware inspection keywords - strictly restricted to hardware resources to avoid hijacking general topics
+  const sysKeywords = [
+    'my cpu', 'cpu usage', 'my ram', 'ram usage', 'system memory', 'memory usage',
+    'my computer specs', 'pc specs', 'system specs', 'computer specs', 'hardware specs',
+    'system info', 'about this pc', 'about this computer', 'host specs',
+    'open calculator', 'launch calculator', 'run terminal command', 'execute command in powershell'
+  ];
   const taskKeywords = ['add task', 'list tasks', 'todo', 'to-do', 'complete task', 'add note', 'list notes', 'delete note'];
   const memoryKeywords = ['remember that', 'remember my', 'recall my', 'what did i tell you', 'my favorite'];
   const weatherKeywords = ['weather', 'forecast', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'humidity', 'predict weather', 'storm', 'celsius', 'fahrenheit'];
-  const webKeywords = ['search the web', 'search google', 'lookup online', 'browse web', 'latest news', 'current price of', 'breaking news'];
+  const webKeywords = [
+    'search', 'google', 'browse', 'lookup', 'look up', 'find online',
+    'latest news', 'current news', 'breaking news', 'recent news', 'today\'s news',
+    'what is happening', 'what happened', 'who is', 'who won', 'current price',
+    'stock price', 'latest update', 'recent events', 'current event', 'ongoing',
+    'election', 'championship', 'tournament', 'world cup', 'space exploration'
+  ];
 
   const matchedTools = new Set<string>();
 
@@ -55,7 +67,14 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
     ['web_search', 'fetch_webpage'].forEach(t => matchedTools.add(t));
   }
 
-  // If no specific tools matched, don't burden the model with schemas (enables <0.5s answers)
+  // Cloud models (Gemini, Grok) have native tool calling and should always have web_search available
+  // so they can dynamically pull live web facts whenever answering current affairs or news
+  const isCloudProvider = !providerName || providerName === 'auto' || providerName === 'gemini' || providerName === 'grok';
+  if (isCloudProvider) {
+    matchedTools.add('web_search');
+    matchedTools.add('fetch_webpage');
+  }
+
   return allTools.filter(t => matchedTools.has(t.name));
 }
 
@@ -110,7 +129,7 @@ export class AgentCore {
     config: AgentConfig = {}
   ): Promise<AgentChatResponse> {
     const isChatMode = config.mode === 'chat';
-    const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 1);
+    const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 3);
     if (isChatMode) {
       config.toolsEnabled = false;
     }
@@ -134,9 +153,15 @@ export class AgentCore {
 
       // Dynamically select only the tools relevant to the prompt (drops 2,500+ schema tokens down to 0-150 tokens)
       const allDefs = this.toolRegistry.getAllDefinitions();
-      const toolDefs = (config.toolsEnabled === false || isChatMode)
+      let toolDefs = (config.toolsEnabled === false || isChatMode)
         ? []
         : selectRelevantTools(userMessage, allDefs, config.modelProvider);
+
+      // Once tools (e.g. web_search, weather, files) have gathered data,
+      // clear tools on subsequent iterations so the LLM cleanly synthesizes the final spoken response
+      if (iteration > 1 && toolsExecuted.length > 0) {
+        toolDefs = [];
+      }
 
       const { response: providerRes, providerUsed } = await this.providerManager.generateResponse(
         messages,

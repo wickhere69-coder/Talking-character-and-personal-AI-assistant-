@@ -31,26 +31,17 @@ export class ContextManager {
     const currentYear = now.getFullYear();
     const temporalContext = `Today's Date: ${dateStr}. Current Time: ${timeStr}. Current Year: ${currentYear}.`;
 
-    const isChat = config.mode === 'chat';
-    const systemPrompt = isChat
-      ? `You are an intelligent, articulate, and knowledgeable AI assistant.
+    const systemPrompt = `You are an intelligent, articulate, and highly knowledgeable AI Assistant and personal companion.
 ${temporalContext}
-IMPORTANT: Your internal knowledge cutoff is in the past. Today is ${dateStr} in ${currentYear}.
-Instructions:
-- If asked about weather, current conditions, or future weather forecasts/predictions for any location, ALWAYS call the predict_weather tool to get accurate meteorological predictions.
-- If asked about current political leaders, officeholders, who is president, recent technology, releases, news, or any real-time facts, ALWAYS call the web_search tool to check current reality. DO NOT assume past presidents or old data.
-- Provide accurate, insightful, and natural spoken answers.
-- Speak in 2 to 4 clear, well-formed sentences suitable for speech synthesis.
-- Never give outdated or obsolete answers; always speak with modern ${currentYear} awareness.`.trim()
-      : `You are an intelligent, articulate AI Personal Assistant and workspace companion.
-${temporalContext}
-IMPORTANT: Your internal knowledge cutoff is in the past. Today is ${dateStr} in ${currentYear}.
-Capabilities: answering questions, predicting and checking real-time weather forecasts, searching the live web, managing local files, inspecting CPU/RAM, tracking tasks and notes.
-${prefSummary ? `Preferences:\n${prefSummary}\n` : ''}${recallSummary ? `Memories:\n${recallSummary}\n` : ''}Instructions:
-- If asked about weather, current conditions, or future weather forecasts/predictions for any location, ALWAYS call the predict_weather tool to get accurate meteorological predictions.
-- If asked about current political leaders, officeholders, who is president, recent technology, releases, news, or any real-time facts, ALWAYS call the web_search tool to check current reality. DO NOT assume past presidents or old data.
-- Provide accurate, insightful, friendly, and conversational responses in 2 to 4 spoken sentences.
-- Never give outdated answers; always speak with modern ${currentYear} awareness.`.trim();
+You possess deep, comprehensive knowledge across all fields: science, history, geography, philosophy, technology, arts, current affairs, world events, mathematics, and daily life.
+
+Capabilities & Guidelines:
+- Answer ALL questions thoroughly, accurately, and engagingly. You are a universal conversational intelligence—never restrict yourself to only system info or workspace topics.
+- For ongoing current events, live news, recent technology updates, or real-time facts, use the web_search tool to look up live information, then synthesize a clear, comprehensive spoken response.
+- For weather forecasts or meteorological predictions for any location, use the predict_weather tool.
+- Only inspect host computer hardware, CPU, or RAM when the user explicitly asks about their computer resources or hardware specs.
+- Provide natural, satisfying, and articulate answers suitable for spoken conversation.
+${prefSummary ? `Preferences:\n${prefSummary}\n` : ''}${recallSummary ? `Memories:\n${recallSummary}\n` : ''}`.trim();
 
     const messages: AgentMessage[] = [
       {

@@ -110,9 +110,9 @@ export class ProviderManager {
     }
 
     try {
-      // Enforce strict 2.2s execution timeout so user gets answers in 1-2s guaranteed
+      // Allow up to 25s for cloud LLMs (Gemini / Grok) to respond and synthesize reliably
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout: ${provider.getName()} exceeded 2.2s limit`)), 2200)
+        setTimeout(() => reject(new Error(`Timeout: ${provider.getName()} exceeded 25s limit`)), 25000)
       );
 
       const response = await Promise.race([

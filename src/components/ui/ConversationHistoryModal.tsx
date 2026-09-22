@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { getAgentHistory, clearAgentHistory } from '@/services/agentService';
+import { TYPO, BUTTONS, SURFACES } from './designSystem';
 import { X, Trash2, Bot, User, MessageSquare } from 'lucide-react';
 
 export default function ConversationHistoryModal() {
@@ -28,20 +29,20 @@ export default function ConversationHistoryModal() {
   if (!isHistoryModalOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in">
-      <div 
-        className="w-full max-w-2xl bg-[#111113]/95 border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-fade-in">
+      <div
+        className={`w-full max-w-2xl ${SURFACES.modalShell} overflow-hidden flex flex-col max-h-[80vh]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-[#151518]/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-[#0F0F12]">
           <div className="flex items-center gap-2.5">
             <MessageSquare size={16} strokeWidth={1.5} className="text-[#8B5CF6]" />
-            <h2 className="text-sm font-semibold text-[#F5F5F7] tracking-wide uppercase">
+            <h2 className={TYPO.title}>
               Conversation Memory & History
             </h2>
-            <span className="text-[11px] text-[#9898A3] px-2 py-0.5 rounded-full bg-white/[0.04]">
-              {history.length} turns
+            <span className={`px-2 py-0.5 rounded-lg ${TYPO.mono} bg-white/[0.04] border border-white/[0.06]`}>
+              {history.length} {history.length === 1 ? 'turn' : 'turns'}
             </span>
           </div>
 
@@ -51,7 +52,7 @@ export default function ConversationHistoryModal() {
                 type="button"
                 onClick={handleClear}
                 disabled={clearing}
-                className="text-xs text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all flex items-center gap-1.5"
+                className={`text-xs px-3 py-1.5 ${BUTTONS.destructive} flex items-center gap-1.5`}
               >
                 <Trash2 size={12} strokeWidth={1.5} />
                 <span>{clearing ? 'Clearing...' : 'Clear History'}</span>
@@ -60,7 +61,7 @@ export default function ConversationHistoryModal() {
             <button
               type="button"
               onClick={() => setIsHistoryModalOpen(false)}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#9898A3] hover:text-[#F5F5F7] hover:bg-white/[0.06] transition-all"
+              className={BUTTONS.icon}
               title="Close modal"
             >
               <X size={15} strokeWidth={1.5} />
@@ -71,21 +72,26 @@ export default function ConversationHistoryModal() {
         {/* Message List */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
           {loading ? (
-            <div className="py-12 text-center text-[#686873] text-sm">
+            <div className="py-16 text-center text-white/40 text-xs">
               Loading conversation history...
             </div>
           ) : history.length === 0 ? (
-            <div className="py-12 text-center text-[#686873] text-sm space-y-1">
-              <p>No conversation history yet.</p>
-              <p className="text-xs text-[#686873]/70">Ask the AI Assistant a question or speak into the microphone to start.</p>
+            <div className="py-16 text-center space-y-2 flex flex-col items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mb-1">
+                <MessageSquare size={18} strokeWidth={1.5} className="text-white/40" />
+              </div>
+              <p className="text-xs text-white/80 font-medium">No conversation history yet.</p>
+              <p className="text-[11px] text-white/40 max-w-xs">
+                Ask the AI Assistant a question or speak into the microphone to start a session.
+              </p>
             </div>
           ) : (
             history.map((msg, idx) => (
-              <div 
-                key={idx} 
-                className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+              <div
+                key={idx}
+                className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
-                <span className="text-[10px] uppercase tracking-wider text-[#686873] font-medium px-1 flex items-center gap-1">
+                <span className={`${TYPO.label} px-1 flex items-center gap-1.5`}>
                   {msg.role === 'user' ? (
                     <>
                       <User size={10} strokeWidth={1.5} />
@@ -98,11 +104,11 @@ export default function ConversationHistoryModal() {
                     </>
                   )}
                 </span>
-                <div 
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed select-text whitespace-pre-wrap ${
-                    msg.role === 'user' 
-                      ? 'bg-gradient-to-r from-[#7C3AED] to-[#6D28D9] text-[#F5F5F7] rounded-br-sm shadow-md' 
-                      : 'bg-[#1A1A1F] border border-white/[0.06] text-[#F5F5F7]/90 rounded-bl-sm'
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap ${
+                    msg.role === 'user'
+                      ? 'bg-gradient-to-br from-[#8B5CF6] to-[#7C3AED] text-white rounded-br-sm shadow-[0_2px_12px_rgba(139,92,246,0.25)]'
+                      : 'bg-[#141417] border border-white/[0.06] text-white/90 rounded-bl-sm'
                   }`}
                 >
                   {msg.content}
@@ -113,12 +119,12 @@ export default function ConversationHistoryModal() {
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3 border-t border-white/[0.06] bg-[#151518]/50 flex items-center justify-between text-[11px] text-[#686873]">
+        <div className="px-6 py-3 border-t border-white/[0.06] bg-[#0F0F12] flex items-center justify-between text-[11px] text-white/40">
           <span>Stored locally in private session memory</span>
           <button
             type="button"
             onClick={() => setIsHistoryModalOpen(false)}
-            className="px-4 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-[#F5F5F7] font-medium transition-all"
+            className={`px-4 py-1.5 text-xs ${BUTTONS.secondary}`}
           >
             Close
           </button>

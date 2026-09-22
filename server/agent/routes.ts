@@ -125,6 +125,9 @@ export function createAgentRouter(): Router {
     process.env[envVarName] = trimmedKey;
     if (envVarName === 'GROK_API_KEY') {
       process.env.XAI_API_KEY = trimmedKey;
+      if (trimmedKey.startsWith('gsk_')) {
+        process.env.GROQ_API_KEY = trimmedKey;
+      }
     }
     agent.getProviderManager().setProviderKey(provider === 'xai' ? 'grok' : provider, trimmedKey);
 
@@ -157,7 +160,7 @@ export function createAgentRouter(): Router {
   // 9. Key Status
   router.get('/key-status', (req, res) => {
     res.json({
-      grok: !!(process.env.GROK_API_KEY?.trim() || process.env.XAI_API_KEY?.trim()),
+      grok: !!(process.env.GROK_API_KEY?.trim() || process.env.XAI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim()),
       gemini: !!(process.env.GEMINI_API_KEY?.trim()),
       elevenlabs: !!(process.env.ELEVENLABS_API_KEY?.trim())
     });

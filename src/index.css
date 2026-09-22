@@ -16,11 +16,11 @@
   --text-primary: #F5F5F5;
   --text-secondary: rgba(255, 255, 255, 0.55);
   --text-muted: rgba(255, 255, 255, 0.35);
-  --accent: #7C3AED;
-  --accent-deep: #6D28D9;
-  --accent-glow: rgba(124, 58, 237, 0.15);
-  --accent-surface: rgba(124, 58, 237, 0.08);
-  --danger: #EF4444;
+  --accent: #8B5CF6;
+  --accent-deep: #7C3AED;
+  --accent-glow: rgba(139, 92, 246, 0.18);
+  --accent-surface: rgba(139, 92, 246, 0.08);
+  --danger: #F43F5E;
   --success: #10B981;
 }
 
@@ -30,18 +30,17 @@ body {
 
 /* ── Custom Scrollbar ── */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
+  width: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 10px;
+  background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(124, 58, 237, 0.25);
-  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(124, 58, 237, 0.4);
+  background: rgba(139, 92, 246, 0.4);
 }
 
 /* ── Panel Glow ── */
