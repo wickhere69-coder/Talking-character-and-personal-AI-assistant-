@@ -28,6 +28,53 @@ export function createAgentRouter(): Router {
     }
   });
 
+  // 1b. Real-time Streaming Endpoint (SSE for Conversational Mode)
+  router.post('/stream', async (req, res) => {
+    const { message, config } = req.body;
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Field "message" is required and must be a string.' });
+    }
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const abortController = new AbortController();
+    // Only abort if the client actually disconnects or closes the response connection early
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+      }
+    });
+
+    try {
+      const result = await agent.handleUserMessageStream(
+        message,
+        config || {},
+        (chunk: string) => {
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+          }
+        },
+        abortController.signal
+      );
+
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ done: true, fullResponse: result.response, modelUsed: result.modelUsed })}\n\n`);
+        res.end();
+      }
+    } catch (err: any) {
+      console.error('Agent stream error:', err);
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: err.message || 'Stream processing failed' })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
   // 2. Confirmation Resolution
   router.post('/confirm', async (req, res) => {
     const { confirmationId, approved } = req.body;
@@ -116,6 +163,8 @@ export function createAgentRouter(): Router {
       ? 'GEMINI_API_KEY'
       : provider === 'elevenlabs'
       ? 'ELEVENLABS_API_KEY'
+      : (provider === 'claude' || provider === 'anthropic')
+      ? 'ANTHROPIC_API_KEY'
       : null;
 
     if (!envVarName) {
@@ -132,21 +181,31 @@ export function createAgentRouter(): Router {
     agent.getProviderManager().setProviderKey(provider === 'xai' ? 'grok' : provider, trimmedKey);
 
     // Persist to .env file
+    const safeKey = trimmedKey.replace(/[\r\n]/g, '');
+    const escapedKey = safeKey.replace(/\$/g, '$$$$');
     try {
       const envPath = path.resolve(process.cwd(), '.env');
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
       const regex = new RegExp(`^${envVarName}=.*$`, 'm');
       if (regex.test(envContent)) {
-        envContent = envContent.replace(regex, `${envVarName}=${trimmedKey}`);
+        envContent = envContent.replace(regex, `${envVarName}=${escapedKey}`);
       } else {
-        envContent += `\n${envVarName}=${trimmedKey}\n`;
+        envContent += `\n${envVarName}=${safeKey}\n`;
       }
       if (envVarName === 'GROK_API_KEY') {
         const xaiRegex = /^XAI_API_KEY=.*$/m;
         if (xaiRegex.test(envContent)) {
-          envContent = envContent.replace(xaiRegex, `XAI_API_KEY=${trimmedKey}`);
+          envContent = envContent.replace(xaiRegex, `XAI_API_KEY=${escapedKey}`);
         } else {
-          envContent += `\nXAI_API_KEY=${trimmedKey}\n`;
+          envContent += `\nXAI_API_KEY=${safeKey}\n`;
+        }
+        if (safeKey.startsWith('gsk_')) {
+          const groqRegex = /^GROQ_API_KEY=.*$/m;
+          if (groqRegex.test(envContent)) {
+            envContent = envContent.replace(groqRegex, `GROQ_API_KEY=${escapedKey}`);
+          } else {
+            envContent += `\nGROQ_API_KEY=${safeKey}\n`;
+          }
         }
       }
       fs.writeFileSync(envPath, envContent);

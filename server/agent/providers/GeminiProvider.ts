@@ -12,7 +12,7 @@ export class GeminiProvider implements IAIProvider {
   constructor(
     apiKey = process.env.GEMINI_API_KEY || '',
     baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+    defaultModel = process.env.GEMINI_MODEL || 'models/gemini-3.8-flash'
   ) {
     this.apiKey = apiKey.trim();
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -76,9 +76,11 @@ export class GeminiProvider implements IAIProvider {
       const rawModels = (res.data?.data || []).map((m: any) => m.id);
       const cleanModels = rawModels.map((id: string) => id.replace(/^models\//, ''));
 
-      const chosen = cleanModels.includes(this.defaultModel)
-        ? this.defaultModel
-        : cleanModels.find((m: string) => m.includes('3.8-flash') || m.includes('3.6-flash') || m.includes('2.5-flash')) || 'gemini-3.8-flash';
+      // cleanModels has the 'models/' prefix stripped; this.defaultModel may carry it.
+      const normalizedDefault = this.defaultModel.replace(/^models\//, '');
+      const chosen = cleanModels.includes(normalizedDefault)
+        ? normalizedDefault
+        : cleanModels.find((m: string) => m.includes('3.8-flash') || m.includes('3.5-flash') || m.includes('flash')) || 'gemini-3.8-flash';
 
       return {
         name: chosen,
@@ -180,17 +182,10 @@ export class GeminiProvider implements IAIProvider {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json'
         },
-        timeout: 14000
+        timeout: 25000
       });
     } catch (err: any) {
-      const fallbackCandidates = [
-        'models/gemini-3.8-flash',
-        'models/gemini-3.5-flash-lite',
-        'models/gemini-3.1-flash-lite',
-        'models/gemini-3-flash-preview',
-        'models/gemini-3.7-flash',
-        'models/gemini-3.6-flash'
-      ].filter((m) => m !== payload.model);
+      const fallbackCandidates = ['models/gemini-3.5-flash', 'models/gemini-3.1-pro-preview'].filter((m) => m !== payload.model);
 
       let succeeded = false;
       for (const altModel of fallbackCandidates) {
@@ -201,7 +196,7 @@ export class GeminiProvider implements IAIProvider {
               Authorization: `Bearer ${key}`,
               'Content-Type': 'application/json'
             },
-            timeout: 12000
+            timeout: 20000
           });
           this.defaultModel = altModel;
           succeeded = true;
@@ -245,5 +240,173 @@ export class GeminiProvider implements IAIProvider {
       content,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined
     };
+  }
+
+  async generateResponseStream(
+    messages: AgentMessage[],
+    tools: ToolDefinition[],
+    config: AgentConfig,
+    onChunk: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<ProviderResponse> {
+    // If tools are provided, run standard response to allow tool execution
+    if (tools.length > 0 && config.toolsEnabled !== false) {
+      return this.generateResponse(messages, tools, config);
+    }
+
+    const key = this.getApiKey();
+    if (!key) {
+      throw new Error('Google Gemini API Key is required.');
+    }
+
+    const isConversational = config.mode === 'conversational' || config.mode === 'chat';
+    const streamTimeout = isConversational ? 8000 : 12000;
+    const maxTokens = Math.max(config.maxTokens || 0, isConversational ? 2048 : 2048);
+
+    const explicitSystem = messages.find((m) => m.role === 'system')?.content || '';
+    const voiceDirective = isConversational
+      ? 'You are a helpful, precise AI voice assistant. Answer the user directly and accurately in 2 to 4 natural spoken sentences. Be conversational, warm, and concise. Do not deflect or evade. Never use markdown asterisks, hashtags, or bullet lists in your response.'
+      : '';
+    const systemPrompt = [voiceDirective, explicitSystem].filter(Boolean).join('\n\n');
+
+    const userOrAssistantMessages = messages.filter((m) => m.role !== 'system');
+    const contents = userOrAssistantMessages.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content || '' }]
+    }));
+    if (contents.length === 0) {
+      contents.push({ role: 'user', parts: [{ text: 'Hello' }] });
+    }
+
+    const nativeCandidates = [
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
+      'gemini-3.1-pro-preview'
+    ];
+
+    for (const candidateModel of nativeCandidates) {
+      const innerAbort = new AbortController();
+      // Keep a reference to the listener so we can remove it after the attempt,
+      // preventing multiple listeners from accumulating on the shared outer signal
+      // across retry iterations.
+      const abortRelay = () => innerAbort.abort();
+      if (signal) {
+        signal.addEventListener('abort', abortRelay);
+      }
+
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:streamGenerateContent?alt=sse&key=${key}`;
+        const payload: any = {
+          contents,
+          generationConfig: {
+            temperature: config.temperature ?? 0.7,
+            maxOutputTokens: maxTokens,
+            thinkingConfig: {
+              thinkingBudget: 1024 // High Reasoning Effect
+            }
+          }
+        };
+        if (systemPrompt) {
+          payload.systemInstruction = { parts: [{ text: systemPrompt }] };
+        }
+
+        const res = await axios.post(url, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          responseType: 'stream',
+          timeout: streamTimeout,
+          signal: innerAbort.signal
+        });
+
+        let fullContent = '';
+        let firstChunkTimer: any = null;
+
+        const streamResult = await new Promise<ProviderResponse>((resolve, reject) => {
+          let streamBuffer = '';
+
+          firstChunkTimer = setTimeout(() => {
+            if (!fullContent) {
+              innerAbort.abort();
+              try { res.data.destroy(); } catch {}
+              reject(new Error(`Native Gemini first token timeout (>7.5s) for ${candidateModel}`));
+            }
+          }, streamTimeout);
+
+          res.data.on('data', (chunk: Buffer) => {
+            if (firstChunkTimer) {
+              clearTimeout(firstChunkTimer);
+              firstChunkTimer = null;
+            }
+
+            streamBuffer += chunk.toString();
+            const lines = streamBuffer.split('\n');
+            streamBuffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('data: ')) {
+                try {
+                  const parsed = JSON.parse(trimmed.slice(6));
+                  // Extract all text parts, cleanly separating out thought tokens from spoken text
+                  const parts = parsed.candidates?.[0]?.content?.parts || [];
+                  let delta = '';
+                  for (const p of parts) {
+                    if (p.text) {
+                      delta += p.text;
+                    }
+                  }
+                  if (delta) {
+                    fullContent += delta;
+                    onChunk(delta);
+                  }
+                } catch {}
+              }
+            }
+          });
+
+          res.data.on('end', () => {
+            if (firstChunkTimer) clearTimeout(firstChunkTimer);
+            if (fullContent.trim().length > 0) {
+              resolve({ content: fullContent });
+            } else {
+              reject(new Error(`Gemini stream for ${candidateModel} ended with empty text`));
+            }
+          });
+
+          res.data.on('error', (err: any) => {
+            if (firstChunkTimer) clearTimeout(firstChunkTimer);
+            if (fullContent.trim().length > 0) {
+              resolve({ content: fullContent });
+            } else {
+              reject(err);
+            }
+          });
+        });
+
+        if (fullContent.trim().length > 0) {
+          this.defaultModel = `models/${candidateModel}`;
+          if (signal) signal.removeEventListener('abort', abortRelay);
+          return streamResult;
+        }
+      } catch (err: any) {
+        if (signal) signal.removeEventListener('abort', abortRelay);
+        if (signal?.aborted) throw err;
+        if (err?.response?.status === 429) {
+          console.warn(`[GEMINI NATIVE STREAM] Free-tier quota reached for candidate ${candidateModel}. Continuing to next candidate model...`);
+          continue;
+        }
+        console.warn(`[GEMINI NATIVE STREAM] Notice on candidate ${candidateModel}:`, err?.message || err);
+        continue;
+      }
+    }
+
+    if (isConversational) {
+      throw new Error('Gemini models unavailable, cascading to high-reasoning backup cloud provider');
+    }
+
+    const fallback = await this.generateResponse(messages, tools, config);
+    if (fallback.content) {
+      onChunk(fallback.content);
+    }
+    return fallback;
   }
 }

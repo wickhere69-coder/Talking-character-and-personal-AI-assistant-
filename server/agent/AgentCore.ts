@@ -39,7 +39,10 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
   const memoryKeywords = ['remember that', 'remember my', 'recall my', 'what did i tell you', 'my favorite'];
   const weatherKeywords = ['weather', 'forecast', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'humidity', 'predict weather', 'storm', 'celsius', 'fahrenheit'];
   const webKeywords = [
-    'search', 'google', 'browse', 'lookup', 'look up', 'find online',
+    // Use explicit phrases instead of bare 'search' to avoid matching "search files",
+    // "search notes", "search my tasks" which should route to file/task tools.
+    'search online', 'search the web', 'search google', 'search for news',
+    'google', 'browse', 'lookup', 'look up', 'find online',
     'latest news', 'current news', 'breaking news', 'recent news', 'today\'s news',
     'what is happening', 'what happened', 'who is', 'who won', 'current price',
     'stock price', 'latest update', 'recent events', 'current event', 'ongoing',
@@ -68,14 +71,35 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
   }
 
   // Cloud models (Gemini, Grok) have native tool calling and should always have web_search available
-  // so they can dynamically pull live web facts whenever answering current affairs or news
-  const isCloudProvider = !providerName || providerName === 'auto' || providerName === 'gemini' || providerName === 'grok';
+  // so they can dynamically pull live web facts whenever answering current affairs or news.
+  // Treat an explicit 'auto' as cloud; leave undefined/unset to rely on keyword matching only —
+  // an unspecified provider may resolve to local_fallback, which does not need these schemas.
+  const isCloudProvider = providerName === 'auto' || providerName === 'gemini' || providerName === 'grok';
   if (isCloudProvider) {
     matchedTools.add('web_search');
     matchedTools.add('fetch_webpage');
   }
 
   return allTools.filter(t => matchedTools.has(t.name));
+}
+
+/**
+ * Synthesizes a plain-text spoken answer from tool execution results.
+ * Called when the LLM did not produce a final content string after tool calls.
+ */
+function synthesizeToolResults(toolsExecuted: AgentChatResponse['toolsExecuted']): string {
+  if (!toolsExecuted || toolsExecuted.length === 0) {
+    return "I've processed your message. How can I assist you further?";
+  }
+  const weatherTool = toolsExecuted.find(t => t.name === 'predict_weather' || t.name === 'get_weather');
+  const webSearchTool = toolsExecuted.find(t => t.name === 'web_search');
+  if (weatherTool && weatherTool.result.message) {
+    return weatherTool.result.message;
+  }
+  if (webSearchTool && Array.isArray(webSearchTool.result.data) && webSearchTool.result.data.length > 0) {
+    return `According to the latest information: ${webSearchTool.result.data.slice(0, 2).join(' ')}`;
+  }
+  return toolsExecuted.map(t => t.result.message).join(' ');
 }
 
 export class AgentCore {
@@ -124,11 +148,73 @@ export class AgentCore {
     return this.conversationHistory;
   }
 
+  async handleUserMessageStream(
+    userMessage: string,
+    config: AgentConfig = {},
+    onChunk: (chunk: string) => void,
+    signal?: AbortSignal
+  ): Promise<{ response: string; modelUsed: string }> {
+    const isConversational = config.mode === 'conversational' || config.mode === 'chat';
+    if (isConversational) {
+      config.toolsEnabled = false;
+      if (!config.maxTokens) {
+        config.maxTokens = 2048; // Ample token headroom for high-reasoning models (Gemini 3.8 Flash)
+      }
+    }
+
+    const messages = this.contextManager.buildPromptMessages(
+      userMessage,
+      this.conversationHistory,
+      config
+    );
+
+    let fullResponse = '';
+    const chunkCollector = (chunk: string) => {
+      fullResponse += chunk;
+      onChunk(chunk);
+    };
+
+    // Select relevant tools for the streaming path the same way the non-streaming
+    // path does. Passing [] always meant weather/web-search queries never ran tools
+    // through the streaming endpoint.
+    const allDefs = this.toolRegistry.getAllDefinitions();
+    const streamToolDefs = (config.toolsEnabled === false || isConversational)
+      ? []
+      : selectRelevantTools(userMessage, allDefs, config.modelProvider);
+
+    const res = await this.providerManager.generateResponseStream(
+      messages,
+      streamToolDefs,
+      config,
+      chunkCollector,
+      signal
+    );
+
+    const finalResponse = (fullResponse.trim() || res.response.content || "I'm right here with you.").trim();
+    if (!fullResponse.trim() && finalResponse) {
+      onChunk(finalResponse);
+    }
+
+    // Update conversation history
+    this.conversationHistory.push({ role: 'user', content: userMessage });
+    this.conversationHistory.push({ role: 'assistant', content: finalResponse });
+    if (this.conversationHistory.length > 20) {
+      this.conversationHistory = this.conversationHistory.slice(-20);
+    }
+
+    this.contextManager.saveTurn(userMessage, finalResponse);
+
+    return {
+      response: finalResponse,
+      modelUsed: res.providerUsed
+    };
+  }
+
   async handleUserMessage(
     userMessage: string,
     config: AgentConfig = {}
   ): Promise<AgentChatResponse> {
-    const isChatMode = config.mode === 'chat';
+    const isChatMode = config.mode === 'chat' || config.mode === 'conversational';
     const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 3);
     if (isChatMode) {
       config.toolsEnabled = false;
@@ -212,30 +298,14 @@ export class AgentCore {
 
         // Fast path: Only local_fallback or explicit chat mode returns tool message directly
         if (providerUsed === 'local_fallback' || isChatMode) {
-          const weatherTool = toolsExecuted.find(t => t.name === 'predict_weather' || t.name === 'get_weather');
-          const webSearchTool = toolsExecuted.find(t => t.name === 'web_search');
-          if (weatherTool && weatherTool.result.message) {
-            finalContent = weatherTool.result.message;
-          } else if (webSearchTool && Array.isArray(webSearchTool.result.data) && webSearchTool.result.data.length > 0) {
-            finalContent = `According to the latest information: ${webSearchTool.result.data.slice(0, 2).join(' ')}`;
-          } else {
-            finalContent = toolsExecuted.map((t) => t.result.message).join(' ');
-          }
+          finalContent = synthesizeToolResults(toolsExecuted);
           break;
         }
 
         // For neural models (Groq, Gemini, Ollama): allow next iteration so the LLM reads
         // the tool execution results and synthesizes a natural, concise, up-to-date answer!
         if (iteration >= maxIterations) {
-          const weatherTool = toolsExecuted.find(t => t.name === 'predict_weather' || t.name === 'get_weather');
-          const webSearchTool = toolsExecuted.find(t => t.name === 'web_search');
-          if (weatherTool && weatherTool.result.message) {
-            finalContent = weatherTool.result.message;
-          } else if (webSearchTool && Array.isArray(webSearchTool.result.data) && webSearchTool.result.data.length > 0) {
-            finalContent = `Based on current live search results: ${webSearchTool.result.data.slice(0, 2).join(' ')}`;
-          } else {
-            finalContent = toolsExecuted.map((t) => t.result.message).join(' ');
-          }
+          finalContent = synthesizeToolResults(toolsExecuted);
           break;
         }
       } else {
@@ -246,19 +316,7 @@ export class AgentCore {
     }
 
     if (!finalContent) {
-      if (toolsExecuted.length > 0) {
-        const weatherTool = toolsExecuted.find(t => t.name === 'predict_weather' || t.name === 'get_weather');
-        const webSearchTool = toolsExecuted.find(t => t.name === 'web_search');
-        if (weatherTool && weatherTool.result.message) {
-          finalContent = weatherTool.result.message;
-        } else if (webSearchTool && Array.isArray(webSearchTool.result.data) && webSearchTool.result.data.length > 0) {
-          finalContent = `According to the latest information: ${webSearchTool.result.data.slice(0, 2).join(' ')}`;
-        } else {
-          finalContent = toolsExecuted.map((t) => t.result.message).join(' ');
-        }
-      } else {
-        finalContent = "I've processed your message. How can I assist you further?";
-      }
+      finalContent = synthesizeToolResults(toolsExecuted);
     }
 
     // Update conversation history

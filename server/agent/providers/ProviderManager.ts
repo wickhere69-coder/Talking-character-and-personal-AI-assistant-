@@ -9,12 +9,12 @@ export class ProviderManager {
   private providers: Map<string, IAIProvider> = new Map();
   private defaultProviderName: string;
 
-  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'grok') {
+  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'gemini') {
     this.defaultProviderName = defaultProviderName;
 
     // Register supported providers
-    this.registerProvider(new GrokProvider());
     this.registerProvider(new GeminiProvider());
+    this.registerProvider(new GrokProvider());
     this.registerProvider(new LocalModelProvider());
     this.registerProvider(new FallbackLocalProvider());
   }
@@ -49,28 +49,24 @@ export class ProviderManager {
     // Explicit provider requested
     if (target !== 'auto' && this.providers.has(target)) {
       const explicit = this.providers.get(target)!;
-      // Fast check: If provider requires an API key and has none, skip immediately
+      // Fast check: If provider requires an API key and has none, skip to free cloud or local
       if ('getApiKey' in explicit && typeof (explicit as any).getApiKey === 'function') {
         const key = (explicit as any).getApiKey();
         if (!key) {
-          console.log(`[PROVIDER] ${target} has no API key configured, using fast local fallback`);
-          return this.providers.get('local_fallback')!;
+          console.log(`[PROVIDER] ${target} has no API key configured, using free cloud reasoning fallback`);
+          return this.providers.get('free_cloud') || this.providers.get('local_fallback')!;
         }
       }
       return explicit;
     }
 
-    // Auto resolution: pick first provider with a configured API key
-    const grok = this.providers.get('grok');
-    if (grok && 'getApiKey' in grok && (grok as any).getApiKey()) {
-      return grok;
-    }
-
+    // Auto resolution: prioritize Gemini (free, high-reasoning)
     const gemini = this.providers.get('gemini');
     if (gemini && 'getApiKey' in gemini && (gemini as any).getApiKey()) {
       return gemini;
     }
 
+    // Fallback to local
     return this.providers.get('local_fallback')!;
   }
 
@@ -110,13 +106,13 @@ export class ProviderManager {
     }
 
     try {
-      // Allow up to 25s for cloud LLMs (Gemini / Grok) to respond and synthesize reliably
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout: ${provider.getName()} exceeded 25s limit`)), 25000)
-      );
+      let timeoutId: ReturnType<typeof setTimeout>;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`Timeout: ${provider.getName()} exceeded 25s limit`)), 25000);
+      });
 
       const response = await Promise.race([
-        provider.generateResponse(messages, tools, config),
+        provider.generateResponse(messages, tools, config).then((r) => { clearTimeout(timeoutId); return r; }),
         timeoutPromise
       ]);
 
@@ -125,7 +121,7 @@ export class ProviderManager {
         providerUsed: provider.getName()
       };
     } catch (err: any) {
-      console.warn(`[PROVIDER SPEED GUARD] Provider ${provider.getName()} notice (${err.message}), falling back to 5ms local engine.`);
+      console.warn(`[PROVIDER SPEED GUARD] Provider ${provider.getName()} notice (${err.message}), falling back to local.`);
       const fallback = this.providers.get('local_fallback');
       if (fallback) {
         const response = await fallback.generateResponse(messages, tools, config);
@@ -137,4 +133,56 @@ export class ProviderManager {
       throw err;
     }
   }
+
+  async generateResponseStream(
+    messages: AgentMessage[],
+    tools: ToolDefinition[],
+    config: AgentConfig,
+    onChunk: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<{ response: ProviderResponse; providerUsed: string }> {
+    const provider = await this.getActiveProvider(config.modelProvider);
+
+    if (provider.getName() === 'local_fallback' || typeof (provider as any).generateResponseStream !== 'function') {
+      const response = await provider.generateResponse(messages, tools, config);
+      if (response.content) {
+        onChunk(response.content);
+      }
+      return { response, providerUsed: provider.getName() };
+    }
+
+    try {
+      const streamProvider = provider as any;
+      const response = await streamProvider.generateResponseStream(
+        messages,
+        tools,
+        config,
+        onChunk,
+        signal
+      );
+      if (!response || !response.content || !response.content.trim()) {
+        throw new Error(`${provider.getName()} stream yielded empty response`);
+      }
+      return {
+        response,
+        providerUsed: provider.getName()
+      };
+    } catch (err: any) {
+      if (signal?.aborted) {
+        return { response: { content: '' }, providerUsed: provider.getName() };
+      }
+      console.warn(`[PROVIDER STREAM NOTICE] Provider ${provider.getName()} stream notice (${err.message}), falling back to local.`);
+      
+      const fallback = this.providers.get('local_fallback');
+      if (fallback) {
+        const response = await fallback.generateResponse(messages, tools, config);
+        if (response.content) {
+          onChunk(response.content);
+        }
+        return { response, providerUsed: 'local_fallback' };
+      }
+      throw err;
+    }
+  }
 }
+

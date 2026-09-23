@@ -15,9 +15,12 @@ export class GrokProvider implements IAIProvider {
     defaultModel = process.env.GROK_MODEL || ''
   ) {
     this.apiKey = apiKey.trim();
-    const isGroq = this.apiKey.startsWith('gsk_') || !!process.env.GROQ_API_KEY;
+    // Determine provider type from the key itself only. Using !!process.env.GROQ_API_KEY
+    // here would cause an xAI key (picked via GROK_API_KEY) to be mistakenly routed to
+    // the Groq endpoint when both env vars are set.
+    const isGroq = this.apiKey.startsWith('gsk_');
     this.baseUrl = baseUrl.replace(/\/$/, '') || (isGroq ? 'https://api.groq.com/openai/v1' : 'https://api.x.ai/v1');
-    this.defaultModel = defaultModel || (isGroq ? 'llama-3.3-70b-versatile' : 'grok-2-latest');
+    this.defaultModel = defaultModel || (isGroq ? 'llama-3.3-70b-versatile' : 'grok-4.7');
   }
 
   getName(): string {
@@ -30,13 +33,23 @@ export class GrokProvider implements IAIProvider {
 
   setApiKey(key: string): void {
     this.apiKey = key.trim();
-    const isGroq = this.apiKey.startsWith('gsk_');
-    if (isGroq) {
-      this.baseUrl = 'https://api.groq.com/openai/v1';
-      this.defaultModel = 'llama-3.3-70b-versatile';
+    if (!this.apiKey) {
+      // When the key is cleared, re-derive the endpoint from env vars so that a
+      // lingering GROQ_API_KEY in the environment isn't accidentally routed to
+      // the xAI endpoint.
+      const envKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || process.env.GROQ_API_KEY || '';
+      const isGroqEnv = envKey.startsWith('gsk_');
+      this.baseUrl = isGroqEnv ? 'https://api.groq.com/openai/v1' : 'https://api.x.ai/v1';
+      this.defaultModel = isGroqEnv ? 'llama-3.3-70b-versatile' : 'grok-4.7';
     } else {
-      this.baseUrl = 'https://api.x.ai/v1';
-      this.defaultModel = 'grok-2-latest';
+      const isGroq = this.apiKey.startsWith('gsk_');
+      if (isGroq) {
+        this.baseUrl = 'https://api.groq.com/openai/v1';
+        this.defaultModel = 'llama-3.3-70b-versatile';
+      } else {
+        this.baseUrl = 'https://api.x.ai/v1';
+        this.defaultModel = 'grok-4.7';
+      }
     }
     this.cachedAvailable = null;
     this.cacheExpiry = 0;
@@ -82,24 +95,55 @@ export class GrokProvider implements IAIProvider {
         timeout: 4000
       });
       const models: string[] = (res.data?.data || []).map((m: any) => m.id);
-      
-      // Look for grok-4.6, or latest grok models
-      const chosen = models.includes(this.defaultModel)
-        ? this.defaultModel
-        : models.find((m: string) => m.includes('4.6') || m.includes('grok-2') || m.includes('grok-beta')) || this.defaultModel;
+      const isGroq = this.baseUrl.includes('groq.com');
+
+      let chosen = this.defaultModel;
+      if (models.includes(this.defaultModel)) {
+        chosen = this.defaultModel;
+      } else if (!isGroq) {
+        // xAI models priority: grok-4.7, grok-4, grok-3-latest, grok-3, grok-2-latest
+        const preferenceList = [
+          'grok-4.7',
+          'grok-4',
+          'grok-3-latest',
+          'grok-3',
+          'grok-2-latest',
+          'grok-2',
+          'grok-beta'
+        ];
+        const match = preferenceList.find(pref => models.includes(pref)) 
+          || models.find((m: string) => m.startsWith('grok-4') || m.startsWith('grok-3') || m.startsWith('grok-2') || m.includes('grok'));
+        chosen = match || this.defaultModel;
+      } else {
+        chosen = models.find((m: string) => m.includes('llama-3.3') || m.includes('llama')) || this.defaultModel;
+      }
+
+      this.defaultModel = chosen;
 
       return {
         name: chosen,
         available: true,
-        details: `xAI Cloud: ${chosen} (Grok 4.6 flagship intelligence)`
+        details: isGroq ? `Groq Cloud: ${chosen}` : `xAI Cloud: ${chosen}`
       };
     } catch (err: any) {
+      const rawError = err.response?.data?.error;
+      const apiError = typeof rawError === 'string' ? rawError : (rawError?.message || err.response?.data?.message || err.message);
       return {
         name: this.defaultModel,
         available: false,
-        details: `xAI Grok API error: ${err.response?.data?.error?.message || err.message}`
+        details: `xAI Grok API error: ${apiError}`
       };
     }
+  }
+
+  private getCandidateModels(explicitModel?: string): string[] {
+    if (explicitModel) return [explicitModel];
+    const isGroq = this.baseUrl.includes('groq.com');
+    if (isGroq) {
+      return Array.from(new Set([this.defaultModel, 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant']));
+    }
+    // xAI candidate priority
+    return Array.from(new Set([this.defaultModel, 'grok-4.7', 'grok-4', 'grok-3-latest', 'grok-2-latest']));
   }
 
   async generateResponse(
@@ -111,8 +155,6 @@ export class GrokProvider implements IAIProvider {
     if (!key) {
       throw new Error('Grok API Key is required. Please set GROK_API_KEY / XAI_API_KEY or configure it in the Control Panel.');
     }
-
-    const model = config.modelName || this.defaultModel;
 
     // Convert tool definitions to strictly compliant JSON Schema for xAI function calling
     const formattedTools = tools.map((t) => {
@@ -168,17 +210,120 @@ export class GrokProvider implements IAIProvider {
       return base;
     });
 
+    const candidateModels = this.getCandidateModels(config.modelName);
+    let lastError: any = null;
+
+    for (const model of candidateModels) {
+      const payload: any = {
+        model,
+        messages: formattedMessages,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: config.maxTokens || 2048
+      };
+
+      if (formattedTools.length > 0) {
+        payload.tools = formattedTools;
+        payload.tool_choice = 'auto';
+      }
+
+      try {
+        const res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 25000
+        });
+
+        const choice = res.data?.choices?.[0];
+        const message = choice?.message;
+
+        if (!message) {
+          throw new Error('No message returned from Grok API');
+        }
+
+        // Remember the model that succeeded
+        if (!config.modelName && this.defaultModel !== model) {
+          this.defaultModel = model;
+        }
+
+        const content = message.content || '';
+        const toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }> = [];
+
+        if (message.tool_calls && Array.isArray(message.tool_calls)) {
+          for (const tc of message.tool_calls) {
+            let parsedArgs = {};
+            try {
+              parsedArgs = typeof tc.function.arguments === 'string'
+                ? JSON.parse(tc.function.arguments)
+                : tc.function.arguments || {};
+            } catch (parseErr) {
+              console.warn('Failed to parse Grok tool arguments:', tc.function.arguments);
+            }
+
+            toolCalls.push({
+              id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              name: tc.function.name,
+              arguments: parsedArgs
+            });
+          }
+        }
+
+        return {
+          content,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+        };
+      } catch (err: any) {
+        lastError = err;
+        const rawError = err.response?.data?.error;
+        const apiError = typeof rawError === 'string' ? rawError : (rawError?.message || err.response?.data?.message || err.message);
+        const status = err.response?.status;
+
+        // Immediately abort candidate loop on authentication failure
+        if (status === 401 || (status === 400 && typeof apiError === 'string' && apiError.toLowerCase().includes('api key'))) {
+          throw new Error(`xAI Grok error: ${apiError}`);
+        }
+
+        console.warn(`Grok model ${model} attempt failed (${apiError}), trying next candidate if available...`);
+      }
+    }
+
+    const rawLast = lastError?.response?.data?.error;
+    const apiError = typeof rawLast === 'string' ? rawLast : (rawLast?.message || lastError?.response?.data?.message || lastError?.message);
+    console.warn('Grok generateResponse error:', apiError);
+    throw new Error(`xAI Grok error: ${apiError}`);
+  }
+
+  async generateResponseStream(
+    messages: AgentMessage[],
+    tools: ToolDefinition[],
+    config: AgentConfig,
+    onChunk: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<ProviderResponse> {
+    if (tools.length > 0 && config.toolsEnabled !== false) {
+      return this.generateResponse(messages, tools, config);
+    }
+
+    const key = this.getApiKey();
+    if (!key) {
+      throw new Error('xAI Grok API Key is required.');
+    }
+
+    const candidateModels = this.getCandidateModels(config.modelName);
+    const model = candidateModels[0] || this.defaultModel;
+    const formattedMessages = messages.map((m) => ({
+      role: m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user'),
+      content: m.content || ''
+    }));
+
     const payload: any = {
       model,
       messages: formattedMessages,
       temperature: config.temperature ?? 0.7,
-      max_tokens: config.maxTokens || 2048
+      max_tokens: config.maxTokens || 1200,
+      stream: true
     };
-
-    if (formattedTools.length > 0) {
-      payload.tools = formattedTools;
-      payload.tool_choice = 'auto';
-    }
 
     try {
       const res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
@@ -186,46 +331,54 @@ export class GrokProvider implements IAIProvider {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json'
         },
-        timeout: 25000
+        responseType: 'stream',
+        timeout: 20000,
+        signal
       });
 
-      const choice = res.data?.choices?.[0];
-      const message = choice?.message;
+      let fullContent = '';
 
-      if (!message) {
-        throw new Error('No message returned from Grok API');
-      }
+      return new Promise<ProviderResponse>((resolve, reject) => {
+        let streamBuffer = '';
 
-      const content = message.content || '';
-      const toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }> = [];
+        res.data.on('data', (chunk: Buffer) => {
+          streamBuffer += chunk.toString();
+          const lines = streamBuffer.split('\n');
+          streamBuffer = lines.pop() || '';
 
-      if (message.tool_calls && Array.isArray(message.tool_calls)) {
-        for (const tc of message.tool_calls) {
-          let parsedArgs = {};
-          try {
-            parsedArgs = typeof tc.function.arguments === 'string'
-              ? JSON.parse(tc.function.arguments)
-              : tc.function.arguments || {};
-          } catch (parseErr) {
-            console.warn('Failed to parse Grok tool arguments:', tc.function.arguments);
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+              try {
+                const parsed = JSON.parse(trimmed.slice(6));
+                const delta = parsed.choices?.[0]?.delta?.content || '';
+                if (delta) {
+                  fullContent += delta;
+                  onChunk(delta);
+                }
+              } catch {}
+            }
           }
+        });
 
-          toolCalls.push({
-            id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            name: tc.function.name,
-            arguments: parsedArgs
-          });
-        }
-      }
+        res.data.on('end', () => {
+          resolve({ content: fullContent });
+        });
 
-      return {
-        content,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined
-      };
+        res.data.on('error', (err: any) => {
+          if (fullContent) {
+            resolve({ content: fullContent });
+          } else {
+            reject(err);
+          }
+        });
+      });
     } catch (err: any) {
-      const apiError = err.response?.data?.error?.message || err.response?.data?.message || err.message;
-      console.warn('Grok generateResponse error:', apiError);
-      throw new Error(`xAI Grok error: ${apiError}`);
+      const fallback = await this.generateResponse(messages, tools, config);
+      if (fallback.content) {
+        onChunk(fallback.content);
+      }
+      return fallback;
     }
   }
 }

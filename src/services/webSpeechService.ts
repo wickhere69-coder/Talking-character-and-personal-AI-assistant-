@@ -207,9 +207,7 @@ export function speakText(
   if (options.onError) {
     utterance.onerror = (event) => {
       if (sessionId !== activeUtteranceSession) return;
-      if (event.error !== 'canceled' && options.onError) {
-        options.onError(event);
-      }
+      options.onError?.(event);
     };
   }
 

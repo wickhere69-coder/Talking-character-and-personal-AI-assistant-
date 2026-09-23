@@ -82,7 +82,8 @@ export interface ReminderItem {
 }
 
 export interface AgentConfig {
-  mode?: 'agent' | 'chat' | 'repeat';
+  mode?: 'agent' | 'chat' | 'conversational' | 'repeat';
+  maxTokens?: number;
   toolsEnabled?: boolean;
   modelProvider?: string;
   modelName?: string;

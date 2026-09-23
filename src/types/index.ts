@@ -140,8 +140,10 @@ export interface AppState {
   // AI Assistant / Agent State
   agentMode: boolean;
   setAgentMode: (mode: boolean) => void;
-  agentModeType: 'agent' | 'chat' | 'repeat';
-  setAgentModeType: (mode: 'agent' | 'chat' | 'repeat') => void;
+  agentModeType: 'agent' | 'chat' | 'repeat' | 'conversational';
+  setAgentModeType: (mode: 'agent' | 'chat' | 'repeat' | 'conversational') => void;
+  isConversationalActive: boolean;
+  setIsConversationalActive: (active: boolean) => void;
   agentSpeed: 'instant' | 'grok' | 'gemini';
   setAgentSpeed: (speed: 'instant' | 'grok' | 'gemini') => void;
   agentStatus: 'idle' | 'listening' | 'thinking' | 'planning' | 'executing_tool' | 'speaking' | 'completed' | 'error' | 'awaiting_confirmation';

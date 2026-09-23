@@ -170,7 +170,7 @@ export class ProceduralAnimation {
     this.headSwayPhaseY += delta * (Math.PI * 2) * 0.20;
     this.headSwayPhaseZ += delta * (Math.PI * 2) * 0.14;
 
-    // Subtle conversational nod on speech accents
+    // Subtle conversational nod on speech accents or attentive listening
     if (isSpeaking) {
       this.nodTimer -= delta;
       if (this.nodTimer <= 0) {
@@ -178,6 +178,15 @@ export class ProceduralAnimation {
         this.nodPhase = 0;
         this.nodIntensity = 0;
         this.nodTimer = 2.5 + Math.random() * 2.5;
+      }
+    } else if (agentStatus === 'listening') {
+      // Attentive listening micro-nod every 3.5 - 5 seconds
+      this.nodTimer -= delta;
+      if (this.nodTimer <= 0) {
+        this.isNodding = true;
+        this.nodPhase = 0;
+        this.nodIntensity = 0;
+        this.nodTimer = 3.5 + Math.random() * 2.0;
       }
     } else {
       this.isNodding = false;
@@ -187,9 +196,10 @@ export class ProceduralAnimation {
 
     let nodOffset = 0;
     if (this.isNodding) {
-      this.nodPhase += delta * Math.PI * 3.0; // ~1.5 cycles per sec
+      this.nodPhase += delta * Math.PI * 2.5;
       this.nodIntensity = THREE.MathUtils.damp(this.nodIntensity, 1.0, 8, delta);
-      nodOffset = this.nodIntensity * Math.sin(this.nodPhase) * 0.045;
+      const amplitude = isSpeaking ? 0.035 : 0.022; // subtle, calm micro-nod
+      nodOffset = this.nodIntensity * Math.sin(this.nodPhase) * amplitude;
       if (this.nodPhase > Math.PI * 4) {
         this.isNodding = false;
         this.nodIntensity = 0;
@@ -203,7 +213,8 @@ export class ProceduralAnimation {
       agentTiltZ = 0.035; // thoughtful tilt
       agentTiltX = -0.015;
     } else if (agentStatus === 'listening') {
-      agentTiltX = 0.018; // attentive lean
+      agentTiltX = 0.025; // subtle attentive forward posture
+      agentTiltZ = 0.015; // natural engaged head angle
     } else if (agentStatus === 'awaiting_confirmation') {
       agentTiltZ = 0.025;
     }

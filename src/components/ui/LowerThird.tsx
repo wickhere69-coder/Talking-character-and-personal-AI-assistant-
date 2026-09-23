@@ -60,9 +60,7 @@ export default function LowerThird() {
       setAgentStatus('speaking');
       setSpeechText(res.response);
       const store = useAppStore.getState();
-      const activeVoice = store.voices.find(v => v.id === store.selectedVoice)
-        || store.voices.find(v => v.id === 'en-US-JennyNeural')
-        || store.voices[0];
+      const activeVoice = store.voices.find(v => v.id === store.selectedVoice) || store.voices[0];
       await voiceManager.speak(res.response, activeVoice);
     } catch {
       setAgentStatus('error');
