@@ -11,12 +11,12 @@ export class GeminiProvider implements IAIProvider {
 
   constructor(
     apiKey = process.env.GEMINI_API_KEY || '',
-    baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel = process.env.GEMINI_MODEL || 'models/gemini-3.8-flash'
+    baseUrl = 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel = process.env.GEMINI_MODEL || 'models/gemini-3.5-flash-lite'
   ) {
     this.apiKey = apiKey.trim();
-    this.baseUrl = baseUrl.replace(/\/$/, '');
-    this.defaultModel = defaultModel;
+    this.baseUrl = baseUrl.replace(/\/$/, '').replace(/\/openai$/, '');
+    this.defaultModel = defaultModel.replace(/^models\//, '');
   }
 
   getName(): string {
@@ -37,16 +37,14 @@ export class GeminiProvider implements IAIProvider {
     const key = this.getApiKey();
     if (!key) return false;
     
-    // Return cached availability if valid (TTL: 60s)
     const now = Date.now();
     if (this.cachedAvailable !== null && now < this.cacheExpiry) {
       return this.cachedAvailable;
     }
 
     try {
-      const res = await axios.get(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${key}` },
-        timeout: 5000
+      const res = await axios.get(`${this.baseUrl}/models?key=${key}`, {
+        timeout: 4000
       });
       this.cachedAvailable = res.status === 200;
       this.cacheExpiry = now + 60000;
@@ -69,23 +67,16 @@ export class GeminiProvider implements IAIProvider {
     }
 
     try {
-      const res = await axios.get(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${key}` },
-        timeout: 6000
+      const res = await axios.get(`${this.baseUrl}/models?key=${key}`, {
+        timeout: 4000
       });
-      const rawModels = (res.data?.data || []).map((m: any) => m.id);
-      const cleanModels = rawModels.map((id: string) => id.replace(/^models\//, ''));
-
-      // cleanModels has the 'models/' prefix stripped; this.defaultModel may carry it.
-      const normalizedDefault = this.defaultModel.replace(/^models\//, '');
-      const chosen = cleanModels.includes(normalizedDefault)
-        ? normalizedDefault
-        : cleanModels.find((m: string) => m.includes('3.8-flash') || m.includes('3.5-flash') || m.includes('flash')) || 'gemini-3.8-flash';
+      const rawModels = (res.data?.models || []).map((m: any) => m.name.replace(/^models\//, ''));
+      const chosen = rawModels.includes(this.defaultModel) ? this.defaultModel : 'gemini-3.5-flash-lite';
 
       return {
         name: chosen,
         available: true,
-        details: `Google Gemini Cloud: ${chosen} (Ultra-fast flash intelligence)`
+        details: `Google Gemini Cloud: ${chosen} (High-intelligence, low-latency conversational engine)`
       };
     } catch (err: any) {
       return {
@@ -96,6 +87,25 @@ export class GeminiProvider implements IAIProvider {
     }
   }
 
+  private getCandidateModels(requestedModel?: string): string[] {
+    const candidates = [
+      (requestedModel || this.defaultModel || 'gemini-3.5-flash-lite').replace(/^models\//, ''),
+      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemma-4-26b-a4b-it'
+    ];
+    // Exclude quota-exhausted models (3.6-flash, 3.8-flash, 3-flash-preview)
+    return candidates.filter((m, idx, arr) => 
+      arr.indexOf(m) === idx && 
+      !m.includes('3.6') && 
+      !m.includes('3.8') && 
+      !m.includes('3-flash-preview') &&
+      !m.includes('2.5-pro') &&
+      !m.includes('2.0')
+    );
+  }
+
   async generateResponse(
     messages: AgentMessage[],
     tools: ToolDefinition[],
@@ -103,143 +113,133 @@ export class GeminiProvider implements IAIProvider {
   ): Promise<ProviderResponse> {
     const key = this.getApiKey();
     if (!key) {
-      throw new Error('Google Gemini API Key is required. Please set GEMINI_API_KEY or configure it in the Control Panel.');
+      throw new Error('Google Gemini API Key is required. Please set GEMINI_API_KEY in .env or Control Panel.');
     }
 
-    const model = config.modelName || this.defaultModel;
+    // Format tools for native Gemini functionDeclarations
+    const toolsConfig: any = {};
+    if (tools.length > 0 && config.toolsEnabled !== false) {
+      const functionDeclarations = tools.map((t) => {
+        const properties: Record<string, any> = {};
+        const required: string[] = [];
 
-    // Convert tool definitions to strictly compliant JSON Schema
-    const formattedTools = tools.map((t) => {
-      const properties: Record<string, any> = {};
-      const required: string[] = [];
-
-      for (const [propKey, prop] of Object.entries(t.parameters)) {
-        properties[propKey] = {
-          type: prop.type,
-          description: prop.description
-        };
-        if (prop.enum) {
-          properties[propKey].enum = prop.enum;
+        for (const [propKey, prop] of Object.entries(t.parameters)) {
+          properties[propKey] = {
+            type: (prop.type || 'string').toUpperCase(),
+            description: prop.description
+          };
+          if (prop.enum) {
+            properties[propKey].enum = prop.enum;
+          }
+          if (prop.required) {
+            required.push(propKey);
+          }
         }
-        if (prop.required) {
-          required.push(propKey);
-        }
-      }
 
-      return {
-        type: 'function',
-        function: {
+        return {
           name: t.name,
           description: t.description,
           parameters: {
-            type: 'object',
+            type: 'OBJECT',
             properties,
             required
           }
-        }
-      };
-    });
+        };
+      });
 
-    // Format messages for Gemini OpenAI-compatible endpoint
-    const formattedMessages: any[] = [];
+      toolsConfig.tools = [{ functionDeclarations }];
+    }
+
+    // Extract system instructions and format user/assistant contents
+    const systemParts: string[] = [];
+    const contents: any[] = [];
+
     for (const m of messages) {
-      if (m.role === 'tool') {
-        formattedMessages.push({
+      if (m.role === 'system') {
+        if (m.content) systemParts.push(m.content);
+      } else if (m.role === 'tool') {
+        contents.push({
           role: 'user',
-          content: `[Information Retrieved]:\n${m.content || ''}\n\nPlease synthesize this into a full, natural, and articulate spoken answer.`
+          parts: [{ text: `[Information Retrieved from Tool]:\n${m.content || ''}\n\nPlease synthesize this into a clear, direct, and complete spoken answer.` }]
         });
-      } else if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && !m.content) {
-        formattedMessages.push({
-          role: 'assistant',
-          content: 'Let me look that up for you right now.'
+      } else if (m.role === 'assistant') {
+        contents.push({
+          role: 'model',
+          parts: [{ text: m.content || '' }]
         });
       } else {
-        formattedMessages.push({
-          role: m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user'),
-          content: m.content || ''
+        contents.push({
+          role: 'user',
+          parts: [{ text: m.content || '' }]
         });
       }
     }
 
-    const modelToUse = model.startsWith('models/') ? model : `models/${model}`;
+    if (contents.length === 0) {
+      contents.push({ role: 'user', parts: [{ text: 'Hello' }] });
+    }
 
     const payload: any = {
-      model: modelToUse,
-      messages: formattedMessages,
-      temperature: config.temperature ?? 0.7,
-      max_tokens: config.maxTokens || 2048
+      contents,
+      generationConfig: {
+        temperature: config.temperature ?? 0.7,
+        maxOutputTokens: config.maxTokens || 2048
+      },
+      ...toolsConfig
     };
 
-    if (formattedTools.length > 0 && config.toolsEnabled !== false) {
-      payload.tools = formattedTools;
-      payload.tool_choice = 'auto';
+    if (systemParts.length > 0) {
+      payload.systemInstruction = {
+        parts: [{ text: systemParts.join('\n\n') }]
+      };
     }
 
-    let res: any;
-    try {
-      res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 25000
-      });
-    } catch (err: any) {
-      const fallbackCandidates = ['models/gemini-3.5-flash', 'models/gemini-3.1-pro-preview'].filter((m) => m !== payload.model);
+    const candidateModels = this.getCandidateModels(config.modelName);
+    let lastError: any = null;
 
-      let succeeded = false;
-      for (const altModel of fallbackCandidates) {
-        try {
-          payload.model = altModel;
-          res = await axios.post(`${this.baseUrl}/chat/completions`, payload, {
-            headers: {
-              Authorization: `Bearer ${key}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 20000
-          });
-          this.defaultModel = altModel;
-          succeeded = true;
-          break;
-        } catch {}
-      }
+    for (const candidate of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${key}`;
+      try {
+        const res = await axios.post(url, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 20000
+        });
 
-      if (!succeeded) {
-        throw err;
-      }
-    }
+        const candidateChoice = res.data?.candidates?.[0];
+        const parts = candidateChoice?.content?.parts || [];
 
-    const choice = res.data?.choices?.[0];
-    const message = choice?.message;
+        let content = '';
+        const toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }> = [];
 
-    let content = message?.content || '';
-    const toolCalls: Array<{ id: string; name: string; arguments: Record<string, any>; extraContent?: any }> = [];
-
-    if (message?.tool_calls && Array.isArray(message.tool_calls)) {
-      for (const tc of message.tool_calls) {
-        if (tc.type === 'function' && tc.function) {
-          let parsedArgs = {};
-          try {
-            parsedArgs = typeof tc.function.arguments === 'string'
-              ? JSON.parse(tc.function.arguments)
-              : tc.function.arguments;
-          } catch {
-            parsedArgs = {};
+        for (const part of parts) {
+          if (part.text) {
+            content += part.text;
           }
-          toolCalls.push({
-            id: tc.id || `tc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            name: tc.function.name,
-            arguments: parsedArgs,
-            extraContent: tc.extra_content
-          });
+          if (part.functionCall) {
+            toolCalls.push({
+              id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              name: part.functionCall.name,
+              arguments: part.functionCall.args || {}
+            });
+          }
         }
+
+        if (content || toolCalls.length > 0) {
+          this.defaultModel = candidate;
+          return {
+            content,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+          };
+        }
+      } catch (err: any) {
+        lastError = err;
+        const msg = err.response?.data?.error?.message || err.message;
+        console.warn(`[GEMINI PROVIDER] Candidate ${candidate} attempt notice (${msg}), trying next available model...`);
+        continue;
       }
     }
 
-    return {
-      content,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined
-    };
+    throw lastError || new Error('All Gemini candidate models were unavailable.');
   }
 
   async generateResponseStream(
@@ -251,7 +251,11 @@ export class GeminiProvider implements IAIProvider {
   ): Promise<ProviderResponse> {
     // If tools are provided, run standard response to allow tool execution
     if (tools.length > 0 && config.toolsEnabled !== false) {
-      return this.generateResponse(messages, tools, config);
+      const res = await this.generateResponse(messages, tools, config);
+      if (res.content) {
+        onChunk(res.content);
+      }
+      return res;
     }
 
     const key = this.getApiKey();
@@ -260,12 +264,12 @@ export class GeminiProvider implements IAIProvider {
     }
 
     const isConversational = config.mode === 'conversational' || config.mode === 'chat';
-    const streamTimeout = isConversational ? 8000 : 12000;
-    const maxTokens = Math.max(config.maxTokens || 0, isConversational ? 2048 : 2048);
+    const streamTimeout = 30000;
+    const maxTokens = Math.max(config.maxTokens || 0, isConversational ? 1024 : 2048);
 
     const explicitSystem = messages.find((m) => m.role === 'system')?.content || '';
     const voiceDirective = isConversational
-      ? 'You are a helpful, precise AI voice assistant. Answer the user directly and accurately in 2 to 4 natural spoken sentences. Be conversational, warm, and concise. Do not deflect or evade. Never use markdown asterisks, hashtags, or bullet lists in your response.'
+      ? 'You are Aura, an articulate, witty, and knowledgeable AI companion. Give clear, thorough, and engaging spoken answers (typically 2 to 5 well-crafted sentences). Never give brief or insufficient one-liners. Provide real substance and detail while speaking naturally. Never output markdown asterisks, hashtags, or bullet lists in your response.'
       : '';
     const systemPrompt = [voiceDirective, explicitSystem].filter(Boolean).join('\n\n');
 
@@ -278,17 +282,10 @@ export class GeminiProvider implements IAIProvider {
       contents.push({ role: 'user', parts: [{ text: 'Hello' }] });
     }
 
-    const nativeCandidates = [
-      'gemini-3.8-flash',
-      'gemini-3.5-flash',
-      'gemini-3.1-pro-preview'
-    ];
+    const candidateModels = this.getCandidateModels(config.modelName);
 
-    for (const candidateModel of nativeCandidates) {
+    for (const candidateModel of candidateModels) {
       const innerAbort = new AbortController();
-      // Keep a reference to the listener so we can remove it after the attempt,
-      // preventing multiple listeners from accumulating on the shared outer signal
-      // across retry iterations.
       const abortRelay = () => innerAbort.abort();
       if (signal) {
         signal.addEventListener('abort', abortRelay);
@@ -296,15 +293,13 @@ export class GeminiProvider implements IAIProvider {
 
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:streamGenerateContent?alt=sse&key=${key}`;
+        const generationConfig: any = {
+          temperature: config.temperature ?? 0.7,
+          maxOutputTokens: maxTokens
+        };
         const payload: any = {
           contents,
-          generationConfig: {
-            temperature: config.temperature ?? 0.7,
-            maxOutputTokens: maxTokens,
-            thinkingConfig: {
-              thinkingBudget: 1024 // High Reasoning Effect
-            }
-          }
+          generationConfig
         };
         if (systemPrompt) {
           payload.systemInstruction = { parts: [{ text: systemPrompt }] };
@@ -327,9 +322,9 @@ export class GeminiProvider implements IAIProvider {
             if (!fullContent) {
               innerAbort.abort();
               try { res.data.destroy(); } catch {}
-              reject(new Error(`Native Gemini first token timeout (>7.5s) for ${candidateModel}`));
+              reject(new Error(`Native Gemini first token timeout (>25s) for ${candidateModel}`));
             }
-          }, streamTimeout);
+          }, 25000);
 
           res.data.on('data', (chunk: Buffer) => {
             if (firstChunkTimer) {
@@ -346,7 +341,6 @@ export class GeminiProvider implements IAIProvider {
               if (trimmed.startsWith('data: ')) {
                 try {
                   const parsed = JSON.parse(trimmed.slice(6));
-                  // Extract all text parts, cleanly separating out thought tokens from spoken text
                   const parts = parsed.candidates?.[0]?.content?.parts || [];
                   let delta = '';
                   for (const p of parts) {
@@ -383,26 +377,19 @@ export class GeminiProvider implements IAIProvider {
         });
 
         if (fullContent.trim().length > 0) {
-          this.defaultModel = `models/${candidateModel}`;
+          this.defaultModel = candidateModel;
           if (signal) signal.removeEventListener('abort', abortRelay);
           return streamResult;
         }
       } catch (err: any) {
         if (signal) signal.removeEventListener('abort', abortRelay);
         if (signal?.aborted) throw err;
-        if (err?.response?.status === 429) {
-          console.warn(`[GEMINI NATIVE STREAM] Free-tier quota reached for candidate ${candidateModel}. Continuing to next candidate model...`);
-          continue;
-        }
-        console.warn(`[GEMINI NATIVE STREAM] Notice on candidate ${candidateModel}:`, err?.message || err);
+        console.warn(`[GEMINI NATIVE STREAM] Candidate ${candidateModel} notice:`, err?.message || err);
         continue;
       }
     }
 
-    if (isConversational) {
-      throw new Error('Gemini models unavailable, cascading to high-reasoning backup cloud provider');
-    }
-
+    // If stream failed across all models, fallback to standard generateResponse
     const fallback = await this.generateResponse(messages, tools, config);
     if (fallback.content) {
       onChunk(fallback.content);

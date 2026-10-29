@@ -14,8 +14,12 @@ import {
   getAgentHealth, 
   clearAgentHistory, 
   saveAgentApiKey, 
-  getAgentKeyStatus 
+  getAgentKeyStatus,
+  getAgentHistory
 } from '@/services/agentService';
+import { auraController } from '@/services/auraConversationController';
+import SessionChatPanel from './SessionChatPanel';
+import SessionSidebar from './SessionSidebar';
 import {
   TYPO,
   BUTTONS,
@@ -24,130 +28,86 @@ import {
   STATUS_DOTS,
 } from './designSystem';
 import {
-  Bot,
-  Repeat,
-  Zap,
-  Mic,
-  MicOff,
   Send,
-  CornerDownLeft,
-  Loader2,
   Play,
-  Pause,
-  Square,
-  Folder,
-  HardDrive,
-  CheckSquare,
-  Brain,
-  HelpCircle,
-  History,
+  Check,
   Trash2,
-  Volume2,
   Key,
   Maximize2,
   Focus,
-  Coffee,
-  Tv,
-  Upload,
   X,
-  PanelRightOpen,
   Sparkles,
-  ExternalLink,
   Sliders,
-  ChevronDown,
-  ChevronUp,
   MessageSquare,
+  Mic,
   Waves,
-  Radio
+  Eye,
+  EyeOff,
+  Search,
+  CheckCircle2,
+  Database,
+  RefreshCw,
+  ExternalLink,
+  Copy,
+  ShieldCheck,
+  Lock
 } from 'lucide-react';
-
-/**
- * Dynamic speech endpoint delay calculation.
- * Ensures the assistant waits patiently until the user actually completes their thought/sentence,
- * avoiding mid-sentence cutoffs when users pause to think or breathe.
- */
-function getSpeechCompletionDelay(
-  transcript: string,
-  isFinal: boolean,
-  mode: 'conversational' | 'agent' | 'repeat' = 'conversational'
-): number {
-  if (mode === 'repeat') {
-    return isFinal ? 400 : 700;
-  }
-
-  const text = transcript.trim().toLowerCase();
-  if (!text) return 1500;
-
-  const words = text.split(/\s+/).filter(Boolean);
-  const wordCount = words.length;
-  const lastWord = words[words.length - 1]?.replace(/[^a-z0-9']/g, '') || '';
-
-  // Words that strongly indicate the user is mid-sentence, hesitating, or about to add another clause:
-  const INCOMPLETE_TRAILING_WORDS = new Set([
-    'and', 'but', 'or', 'so', 'because', 'although', 'though', 'while', 'whereas', 'yet',
-    'to', 'for', 'with', 'about', 'of', 'in', 'at', 'from', 'by', 'on', 'into', 'through', 'between', 'under', 'over',
-    'that', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how', 'if', 'whether', 'as',
-    'the', 'a', 'an', 'my', 'your', 'his', 'her', 'our', 'their', 'this', 'these', 'those',
-    'is', 'are', 'was', 'were', 'am', 'be', 'been', 'being',
-    'have', 'has', 'had', 'do', 'does', 'did',
-    'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
-    'like', 'uh', 'um', 'er', 'ah'
-  ]);
-
-  const endsWithIncompleteWord = INCOMPLETE_TRAILING_WORDS.has(lastWord);
-  const endsWithTerminalPunctuation = /[.?!]$/.test(transcript.trim());
-
-  // User paused right after an incomplete word ("I want to know about..."):
-  // Give them a generous 1.2s window so they are never interrupted mid-thought.
-  if (endsWithIncompleteWord) {
-    return 1200;
-  }
-
-  // Short 1-2 word utterance (e.g. "Hey", "Can you"): wait 0.9s for sentence completion.
-  if (wordCount <= 2) {
-    return 900;
-  }
-
-  // Definite sentence closure with punctuation (. / ? / !):
-  if (endsWithTerminalPunctuation && isFinal) {
-    return 400;
-  }
-
-  // Natural pause after speaking a full clause/thought:
-  // 600ms on final chunk, 1000ms on interim.
-  return isFinal ? 600 : 1000;
-}
+import {
+  fetchSupabaseStatus,
+  saveSupabaseConfig,
+  triggerSupabaseSync,
+  type SupabaseStatusResponse
+} from '@/services/supabaseClient';
+import { getSpeechCompletionDelay } from '@/utils/speechCompletionDelay';
+import { isComplexReasoning } from '@/utils/reasoningDetector';
 
 export default function ControlPanel() {
+  const [chatViewMode, setChatViewMode] = useState<'chat' | 'sessions'>('chat');
   const {
     scriptText, setScriptText,
     playbackState, setPlaybackState,
     selectedVoice, setSelectedVoice,
+    setTtsBackend,
     voices, setVoices,
     activeCamera, setActiveCamera,
     setIsSpeaking,
     setSpeechText,
     lipSyncDelayMs, setLipSyncDelayMs,
     isListening, setIsListening,
-    autoRepeat,
+    autoRepeat, setAutoRepeat,
     agentModeType, setAgentModeType,
-    isConversationalActive, setIsConversationalActive,
     agentSpeed, setAgentSpeed,
     agentStatus, setAgentStatus,
     setCurrentAgentAction,
     setPendingConfirmation,
     setAgentModelName,
-    sceneTheme, setSceneTheme,
-    setCustomGlbUrl,
-    setAudioUrl, setVisemeQueue,
     setActiveTaskSteps,
-    setIsHistoryModalOpen,
     setLastFullResponse,
-    setError
+    setError,
+    activeNavTab: storeNavTab,
+    setActiveNavTab: setStoreNavTab,
+    isControlPanelCollapsed,
+    setIsControlPanelCollapsed,
+    isAlwaysOnMic,
+    setIsAlwaysOnMic
   } = useAppStore();
 
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeNavTab, setActiveNavTab] = useState<'assistant' | 'studio'>('assistant');
+  // Drawer open state synced with store
+  const isCollapsed = isControlPanelCollapsed;
+  const setIsCollapsed = setIsControlPanelCollapsed;
+
+  // Active drawer tab: 'chat' | 'voice' | 'settings'
+  const [activeTab, setActiveTab] = useState<'chat' | 'voice' | 'settings'>('chat');
+
+  // Voice library search
+  const [voiceSearchQuery, setVoiceSearchQuery] = useState('');
+
+  // History state
+  const [chatHistory, setChatHistory] = useState<Array<{ role: string; content: string }>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyClearing, setHistoryClearing] = useState(false);
+
+  // API keys state
   const [elevenLabsKey, setElevenLabsKey] = useState<string>(() => {
     return typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
   });
@@ -157,16 +117,32 @@ export default function ControlPanel() {
   const [geminiKey, setGeminiKey] = useState<string>(() => {
     return typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') || '' : '';
   });
-  const [keyStatuses, setKeyStatuses] = useState<{ grok: boolean; gemini: boolean; elevenlabs: boolean; }>({
+  const [showKeySecret, setShowKeySecret] = useState(false);
+  const [activeKeyProvider, setActiveKeyProvider] = useState<'gemini' | 'grok' | 'elevenlabs'>('gemini');
+  const [keyStatuses, setKeyStatuses] = useState<{ grok: boolean; gemini: boolean; elevenlabs: boolean }>({
     grok: false,
     gemini: false,
     elevenlabs: false
   });
-  const [activeKeyTab, setActiveKeyTab] = useState<'grok' | 'gemini' | 'elevenlabs'>('gemini');
-  const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [keyToastMessage, setKeyToastMessage] = useState<string | null>(null);
-  const [historyClearedToast, setHistoryClearedToast] = useState(false);
-  const [voiceFilterTab, setVoiceFilterTab] = useState<'all' | 'azure' | 'elevenlabs' | 'webSpeech'>('all');
+
+  // Supabase Cloud Database state
+  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('supabase_url') || '' : '';
+  });
+  const [supabaseKey, setSupabaseKey] = useState<string>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('supabase_anon_key') || '' : '';
+  });
+  const [showSupabaseKey, setShowSupabaseKey] = useState(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatusResponse | null>(null);
+  const [supabaseLoading, setSupabaseLoading] = useState(false);
+  const [supabaseSyncing, setSupabaseSyncing] = useState(false);
+  const [supabaseToast, setSupabaseToast] = useState<string | null>(null);
+  const [showSqlHelper, setShowSqlHelper] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
+
+  // Diagnostics health
   const [agentHealthInfo, setAgentHealthInfo] = useState<{
     connected: boolean;
     model: string;
@@ -174,106 +150,101 @@ export default function ControlPanel() {
     memoryReady: boolean;
   }>({
     connected: true,
-    model: 'llama3.2:3b',
+    model: 'gemini-3.5-flash',
     toolsCount: 28,
     memoryReady: true
   });
 
   const recognitionRef = useRef<SpeechRecognizerController | null>(null);
   const silenceTimerRef = useRef<any>(null);
-  const isAskingRef = useRef(false);
-  const autoRepeatRef = useRef(autoRepeat);
-  autoRepeatRef.current = autoRepeat;
   const userWantsListeningRef = useRef(false);
+  const lastAccumulatedTranscriptRef = useRef<string>('');
 
-  // Conversational duplex character mode refs
-  const conversationalAbortControllerRef = useRef<AbortController | null>(null);
-  const conversationalSilenceTimerRef = useRef<any>(null);
-  const conversationalActiveRef = useRef(false);
-  const isStartingConversationalRef = useRef(false);
-  const startConversationalListeningRef = useRef<() => void>(() => {});
-  const processConversationalTurnRef = useRef<(text: string) => Promise<void>>(async () => {});
-
-  // Load voices & agent health on mount
+  // Sync drawer tab with left sidebar storeNavTab
   useEffect(() => {
-    async function init() {
-      const allVoices = await loadAllCuratedVoices();
-      setVoices(allVoices);
-
-      const savedVoice = typeof window !== 'undefined' ? localStorage.getItem('talking_character_selected_voice') : null;
-      const validSaved = savedVoice ? allVoices.find(v => v.id === savedVoice) : null;
-      if (validSaved) {
-        setSelectedVoice(validSaved.id);
-      } else if (allVoices.length > 0) {
-        const defaultVoice = allVoices[0];
-        setSelectedVoice(defaultVoice.id);
-        if (typeof window !== 'undefined') {
-          try { localStorage.setItem('talking_character_selected_voice', defaultVoice.id); } catch {}
-        }
-      }
-
-      const health = await getAgentHealth();
-      if (health) {
-        const isConnected = health.status === 'healthy';
-        const modelName = health.provider?.modelInfo?.name || 'llama3.2:3b';
-        setAgentModelName(modelName);
-        setAgentHealthInfo({
-          connected: isConnected,
-          model: modelName,
-          toolsCount: health.toolsRegistered || 28,
-          memoryReady: true
-        });
-      } else {
-        setAgentHealthInfo(prev => ({ ...prev, connected: false }));
-      }
-
-      const status = await getAgentKeyStatus();
-      if (status) {
-        setKeyStatuses(status);
-      }
+    if (storeNavTab === 'home') {
+      setIsControlPanelCollapsed(true);
+    } else if (storeNavTab === 'chat') {
+      setIsControlPanelCollapsed(false);
+      setActiveTab('chat');
+      loadHistory();
+    } else if (storeNavTab === 'voice') {
+      setIsControlPanelCollapsed(false);
+      setActiveTab('voice');
+    } else if (storeNavTab === 'settings') {
+      setIsControlPanelCollapsed(false);
+      setActiveTab('settings');
     }
-    init();
-  }, [setVoices, setSelectedVoice, setAgentModelName]);
+  }, [storeNavTab, setIsControlPanelCollapsed]);
 
-  const startListeningRef = useRef<() => void>(() => {});
+  const loadHistory = useCallback(() => {
+    setHistoryLoading(true);
+    getAgentHistory()
+      .then((items) => setChatHistory(items || []))
+      .finally(() => setHistoryLoading(false));
+  }, []);
 
-  // Sub-second repeat loop: Re-arm microphone when character finishes speaking
+  // Initialize voices and check system health
   useEffect(() => {
-    voiceManager.setOnPlaybackEnd(() => {
-      const state = useAppStore.getState();
-      if (state.agentModeType === 'repeat') {
-        setScriptText('');
-        if (state.autoRepeat && !isAskingRef.current) {
-          // Immediately re-open microphone for smooth conversational practice
-          setTimeout(() => {
-            const freshState = useAppStore.getState();
-            if (freshState.autoRepeat && !freshState.isSpeaking && !freshState.isListening) {
-              startListeningRef.current?.();
-            }
-          }, 60);
+    const init = async () => {
+      try {
+        const curVoices = await loadAllCuratedVoices();
+        setVoices(curVoices);
+        const savedVoiceId = typeof window !== 'undefined' ? localStorage.getItem('talking_character_selected_voice') : null;
+        const lilyId = 'pFZP5JQG7iQjIQuC4Bku';
+        const targetId = (savedVoiceId && savedVoiceId !== 'hpp4J3VqNfWAUOO0d1Us' && savedVoiceId !== 'en-US-JennyNeural' && curVoices.some(v => v.id === savedVoiceId))
+          ? savedVoiceId
+          : lilyId;
+        const match = curVoices.find(v => v.id === targetId) || curVoices[0];
+        if (match) {
+          setSelectedVoice(match.id);
+          setTtsBackend('elevenlabs');
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('talking_character_selected_voice', match.id);
+              localStorage.setItem('talking_character_tts_backend', 'elevenlabs');
+            } catch {}
+          }
         }
+      } catch (err) {
+        console.warn('Voice loader notice:', err);
       }
-    });
-    return () => {
-      voiceManager.setOnPlaybackEnd(null);
+
+      try {
+        const health = await getAgentHealth();
+        if (health) {
+          setAgentHealthInfo({
+            connected: !!health.status || !!health.connected,
+            model: health.model || 'Google Gemini 3.5 Flash',
+            toolsCount: health.toolsCount || 28,
+            memoryReady: true
+          });
+          // health.model used for diagnostics only — don't override user's engine selection
+        }
+      } catch {}
+
+      try {
+        const keyStatus = await getAgentKeyStatus();
+        if (keyStatus) {
+          setKeyStatuses(keyStatus);
+        }
+      } catch {}
+
+      try {
+        const spStatus = await fetchSupabaseStatus();
+        if (spStatus) {
+          setSupabaseStatus(spStatus);
+          if (spStatus.url && !supabaseUrl) {
+            setSupabaseUrl(spStatus.url);
+          }
+        }
+      } catch {}
     };
-  }, [setScriptText]);
 
-  const stopListening = useCallback(() => {
-    userWantsListeningRef.current = false;
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      try { recognitionRef.current.stop(); } catch {}
-      recognitionRef.current = null;
-    }
-    setIsListening(false);
-  }, [setIsListening]);
+    init();
+  }, [setVoices, setSelectedVoice, setTtsBackend, setAgentModelName, supabaseUrl]);
 
-  // Clean Markdown syntax before sending to speech engine
+  // Clean Markdown syntax before sending to speech synthesis
   const cleanTextForSpeech = (text: string): string => {
     if (!text) return '';
     return text
@@ -290,11 +261,24 @@ export default function ControlPanel() {
       .trim();
   };
 
+  const stopListening = useCallback(() => {
+    userWantsListeningRef.current = false;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch {}
+      try { recognitionRef.current.stop(); } catch {}
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+  }, [setIsListening]);
+
   const speakAndSync = useCallback(async (textToSpeak: string, isInstantRepeat: boolean = false) => {
     const cleaned = cleanTextForSpeech(textToSpeak);
     if (!cleaned) return;
 
-    // Immediately shut off microphone so character never speaks into its own mic
     stopListening();
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
@@ -308,70 +292,74 @@ export default function ControlPanel() {
   }, [elevenLabsKey, stopListening]);
 
   // Main Agent Ask Handler
-  const handleAskAgent = useCallback(async (textToAsk: string) => {
-    const trimmed = textToAsk?.trim();
-    if (!trimmed || isAskingRef.current) return;
+  const handleAskAgent = useCallback(async (rawPromptText?: string) => {
+    const promptToSend = rawPromptText !== undefined ? rawPromptText : scriptText;
+    const trimmed = promptToSend.trim();
+    if (!trimmed) return;
 
-    isAskingRef.current = true;
-    console.log(`[TASK] Initiating agent query: "${trimmed}"`);
-
-    // Immediately stop microphone & any active silence timers
-    stopListening();
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
 
-    // Stop all active speech & in-flight synthesis
     voiceManager.stopAll('new_task');
-
-    // Immediately clear prompt box for next turn
     setScriptText('');
-
     setAgentStatus('thinking');
     setCurrentAgentAction(null);
     setPlaybackState('loading');
     setError(null);
-    setActiveTaskSteps([{ title: 'Processing answer...', status: 'in_progress' }]);
+    setActiveTaskSteps([{ title: 'Thinking & analyzing query...', status: 'in_progress' }]);
 
     try {
-      const providerMapping = agentSpeed === 'instant' ? 'local_fallback' : (agentSpeed || 'gemini');
+      const isReasoning = isComplexReasoning(trimmed);
+      const providerMapping = isReasoning
+        ? 'langgraph'
+        : (agentSpeed === 'instant' ? 'local_fallback' : (agentSpeed || 'gemini'));
+
+      if (isReasoning) {
+        setAgentModelName('Deep Think');
+        setAgentSpeed('langgraph');
+      }
+
       const res = await sendAgentMessage(trimmed, {
         mode: agentModeType,
         modelProvider: providerMapping,
         maxTokens: 2048
       });
 
-      console.log(`[AI RESPONSE] Received response (${res.modelUsed || 'default'}): "${(res.response || '').substring(0, 80)}..."`);
-
-      if (res.modelUsed) {
-        const readableModel =
-          res.modelUsed === 'grok'
-            ? 'xAI Grok 4.7'
-            : res.modelUsed === 'gemini'
-            ? 'Google Gemini 3.8 Flash'
-            : 'Fast Local Engine';
-        setAgentModelName(readableModel);
+      // Synchronize intelligence mode pill with actual model used
+      const isLangGraph = res.modelUsed?.toLowerCase().includes('langgraph') || res.modelUsed?.toLowerCase().includes('reasoning') || isReasoning;
+      if (isLangGraph) {
+        setAgentModelName('Deep Think');
+        setAgentSpeed('langgraph');
+      } else if (agentSpeed !== 'langgraph' && agentSpeed !== 'instant') {
+        setAgentModelName('Balanced');
+        setAgentSpeed('gemini');
       }
+
+      // Display clean response on screen matching spoken voice
+      const cleaned = cleanTextForSpeech(res.response);
+      setSpeechText(cleaned);
+      setLastFullResponse(res.response);
 
       if (res.pendingConfirmation) {
         setPendingConfirmation(res.pendingConfirmation);
         setAgentStatus('awaiting_confirmation');
-        await speakAndSync(res.response);
+        await speakAndSync(cleaned);
       } else {
         setAgentStatus('speaking');
         if (res.toolsExecuted && res.toolsExecuted.length > 0) {
           const toolNames = res.toolsExecuted.map((t) => t.name).join(', ');
           setCurrentAgentAction(`Executed: ${toolNames}`);
           setActiveTaskSteps([
-            { title: 'Analyze user prompt', status: 'completed' },
+            { title: 'Analyze prompt', status: 'completed' },
             { title: `Executed: ${toolNames}`, status: 'completed' },
-            { title: 'Synthesize response', status: 'completed' }
+            { title: 'Synthesize spoken response', status: 'completed' }
           ]);
         } else {
           setActiveTaskSteps([
-            { title: 'Analyze user prompt', status: 'completed' },
-            { title: 'Evaluate local capabilities & tools', status: 'completed' },
+            { title: 'Analyze prompt', status: 'completed' },
+            { title: isLangGraph ? 'Deep Reasoning & Analytical Synthesis' : 'Evaluate local capabilities & tools', status: 'completed' },
             { title: 'Synthesize spoken response', status: 'completed' }
           ]);
           setTimeout(() => {
@@ -379,1516 +367,675 @@ export default function ControlPanel() {
           }, 1200);
         }
 
-        // Store full response for viewer modal
-        setLastFullResponse(res.response);
-        await speakAndSync(res.response);
+        await speakAndSync(cleaned);
       }
+
+      // Refresh history turns
+      loadHistory();
     } catch (err: any) {
       console.error('Agent query error:', err);
       setAgentStatus('error');
-      setError(err?.message || 'Agent error');
+      setError(err?.message || 'Agent query error');
       setActiveTaskSteps([]);
-      await speakAndSync(`I encountered an issue processing your request: ${err?.message || 'Unknown error'}`);
-    } finally {
-      isAskingRef.current = false;
+      setPlaybackState('idle');
     }
-  }, [agentModeType, agentSpeed, setAgentStatus, setCurrentAgentAction, setPlaybackState, setError, setActiveTaskSteps, setAgentModelName, setPendingConfirmation, setScriptText, setLastFullResponse, speakAndSync, stopListening]);
+  }, [scriptText, agentSpeed, agentModeType, setScriptText, setAgentStatus, setCurrentAgentAction, setPlaybackState, setError, setActiveTaskSteps, setAgentModelName, setAgentSpeed, setSpeechText, setPendingConfirmation, speakAndSync, setLastFullResponse, loadHistory]);
 
-  // Speech Recognition: Start listening
-  const startListening = useCallback(() => {
-    if (!isSpeechRecognitionSupported()) {
-      setError('Microphone speech recognition requires Google Chrome, Edge, or Brave browser.');
-      return;
-    }
-
-    // Hard-cancel any active audio/speech before listening
-    voiceManager.stopAll('start_listening');
-    setAgentStatus('listening');
-    userWantsListeningRef.current = true;
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-
-    let accumulated = '';
-
-    const recognition = createSpeechRecognizer({
-      onTranscript: (transcript: string, isFinal: boolean) => {
-        accumulated = transcript;
-        setScriptText(transcript);
-
-        if (silenceTimerRef.current) {
-          clearTimeout(silenceTimerRef.current);
-        }
-
-        const isRepeat = useAppStore.getState().agentModeType === 'repeat';
-        // Intelligent sentence completion delay: waits until user finishes sentence
-        const delay = getSpeechCompletionDelay(accumulated, isFinal, isRepeat ? 'repeat' : 'agent');
-
-        silenceTimerRef.current = setTimeout(async () => {
-          userWantsListeningRef.current = false;
-          stopListening();
-          const toProcess = accumulated.trim();
-          accumulated = '';
-          if (toProcess) {
-            if (isRepeat) {
-              await speakAndSync(toProcess, true);
-            } else {
-              await handleAskAgent(toProcess);
-            }
-          }
-        }, delay);
-      },
-      onEnd: () => {
-        setIsListening(false);
-        if (useAppStore.getState().agentStatus === 'listening') {
-          setAgentStatus('idle');
-        }
-      },
-      onError: (err) => {
-        console.warn('Speech recognition notice:', err);
-        if (err === 'no-speech' && userWantsListeningRef.current) {
-          return; // Ignore transient no-speech timeouts; keep listening
-        }
-        userWantsListeningRef.current = false;
-        setIsListening(false);
-        setAgentStatus('idle');
-      }
-    });
-
-    if (recognition) {
-      try {
-        recognition.start();
-        recognitionRef.current = recognition;
-        setIsListening(true);
-      } catch (e) {
-        console.error('Could not start microphone', e);
-        userWantsListeningRef.current = false;
-        setIsListening(false);
-        setAgentStatus('idle');
-      }
-    }
-  }, [agentModeType, setScriptText, setIsListening, setAgentStatus, setError, handleAskAgent, speakAndSync, stopListening]);
-
-  startListeningRef.current = startListening;
-
-  // ── Conversational Duplex Mode Handlers ──
-  const stopConversationalMode = useCallback(() => {
-    isStartingConversationalRef.current = false;
-    conversationalActiveRef.current = false;
-    setIsConversationalActive(false);
-    if (conversationalSilenceTimerRef.current) {
-      clearTimeout(conversationalSilenceTimerRef.current);
-      conversationalSilenceTimerRef.current = null;
-    }
-    if (conversationalAbortControllerRef.current) {
-      conversationalAbortControllerRef.current.abort();
-      conversationalAbortControllerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-    voiceManager.stopAll('end_conversation');
-    stopListening();
-    setAgentStatus('idle');
-    setIsListening(false);
-  }, [setIsConversationalActive, stopListening, setAgentStatus, setIsListening]);
-
-  const processConversationalTurn: (userTranscript: string) => Promise<void> = useCallback(async (userTranscript: string) => {
-    if (!conversationalActiveRef.current) return;
-    const trimmed = userTranscript.trim();
-    if (!trimmed) {
-      if (conversationalActiveRef.current) {
-        startConversationalListeningRef.current();
-      }
-      return;
-    }
-
-    console.log(`[CONVERSATION] Processing user turn: "${trimmed}"`);
-
-    // STOP MICROPHONE immediately so character's voice from speakers is NEVER recorded!
-    if (conversationalSilenceTimerRef.current) {
-      clearTimeout(conversationalSilenceTimerRef.current);
-      conversationalSilenceTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-    setIsListening(false);
-
-    setAgentStatus('thinking');
-    setActiveTaskSteps([{ title: 'Thinking & streaming answer...', status: 'in_progress' }]);
-
-    // Abort previous stream if any
-    if (conversationalAbortControllerRef.current) {
-      conversationalAbortControllerRef.current.abort();
-    }
-    const abortController = new AbortController();
-    conversationalAbortControllerRef.current = abortController;
-
-    // Read agentSpeed from store at call-time to avoid stale closure when user switches engine mid-conversation
-    const currentSpeed = useAppStore.getState().agentSpeed;
-    const providerMapping = currentSpeed === 'instant' ? 'local_fallback' : (currentSpeed || 'gemini');
-    let sentenceCount = 0;
-
-    // Start stream playback session with safe turn completion handler
-    voiceManager.startStreamSession(() => {
-      if (conversationalActiveRef.current) {
-        setActiveTaskSteps([]);
-        setAgentStatus('listening');
-        startConversationalListeningRef.current();
-      }
-    });
-
-    try {
-      await streamAgentConversation(
-        trimmed,
-        {
-          mode: 'conversational',
-          modelProvider: providerMapping,
-          maxTokens: 2048 // Full token budget for Gemini 3.8 Flash high reasoning tokens
-        },
-        {
-          onSentence: (sentence) => {
-            if (!conversationalActiveRef.current) return;
-            sentenceCount++;
-            const currentScript = useAppStore.getState().scriptText;
-            const updatedScript = sentenceCount === 1 ? sentence : `${currentScript} ${sentence}`.trim();
-            setScriptText(updatedScript);
-            setSpeechText(sentence);
-            if (sentenceCount === 1) {
-              setAgentStatus('speaking');
-              setActiveTaskSteps([
-                { title: 'Processing prompt', status: 'completed' },
-                { title: 'Streaming spoken response', status: 'in_progress' }
-              ]);
-            }
-            voiceManager.enqueueSentence(sentence);
-          },
-          onComplete: (fullResponse, modelUsed) => {
-            setLastFullResponse(fullResponse);
-            // Update the full transcript display but do NOT overwrite the per-sentence
-            // speechText that LowerThird is currently highlighting — that would cause
-            // the subtitle to jump from the current sentence to the full multi-sentence response.
-            if (fullResponse) {
-              setScriptText(fullResponse);
-            }
-            if (modelUsed) {
-              const readable =
-                modelUsed === 'grok' ? 'xAI Grok 4.7'
-                : modelUsed === 'gemini' ? 'Google Gemini 3.8 Flash'
-                : 'Fast Local Engine';
-              setAgentModelName(readable);
-            }
-
-            // Guaranteed speech handoff: if no streaming chunks were enqueued, speak full response directly
-            if (sentenceCount === 0 && fullResponse.trim() && conversationalActiveRef.current) {
-              setAgentStatus('speaking');
-              setActiveTaskSteps([
-                { title: 'Processing prompt', status: 'completed' },
-                { title: 'Speaking response', status: 'in_progress' }
-              ]);
-              voiceManager.speakSentence(fullResponse.trim(), () => {
-                if (conversationalActiveRef.current) {
-                  setActiveTaskSteps([]);
-                  setAgentStatus('listening');
-                  startConversationalListeningRef.current();
-                }
-              });
-            } else {
-              voiceManager.notifyStreamDone();
-            }
-          },
-          onError: (err) => {
-            console.warn('[CONVERSATION] Stream notice:', err);
-            // Guaranteed response: speak friendly fallback rather than silently cycling to listening
-            if (sentenceCount === 0 && conversationalActiveRef.current) {
-              const fallbackMsg = "I'm right here with you! Could you please repeat that?";
-              setScriptText(fallbackMsg);
-              setSpeechText(fallbackMsg);
-              setAgentStatus('speaking');
-              voiceManager.speakSentence(fallbackMsg, () => {
-                if (conversationalActiveRef.current) {
-                  setActiveTaskSteps([]);
-                  setAgentStatus('listening');
-                  startConversationalListeningRef.current();
-                }
-              });
-            } else {
-              voiceManager.notifyStreamDone();
-            }
-          }
-        },
-        abortController.signal
-      );
-    } catch (err: any) {
-      console.error('[CONVERSATION] Turn error:', err);
-      if (sentenceCount === 0 && conversationalActiveRef.current) {
-        const fallbackMsg = "I'm right here with you! What would you like to explore?";
-        setScriptText(fallbackMsg);
-        setSpeechText(fallbackMsg);
-        setAgentStatus('speaking');
-        voiceManager.speakSentence(fallbackMsg, () => {
-          if (conversationalActiveRef.current) {
-            setActiveTaskSteps([]);
-            setAgentStatus('listening');
-            startConversationalListeningRef.current();
-          }
-        });
-      } else {
-        voiceManager.notifyStreamDone();
-      }
-    }
-  }, [setAgentStatus, setActiveTaskSteps, setLastFullResponse, setAgentModelName, setIsListening, setScriptText, setSpeechText]);
-
-  const startConversationalListening: () => void = useCallback(() => {
-    if (!conversationalActiveRef.current) return;
-    if (!isSpeechRecognitionSupported()) {
-      setError('Microphone speech recognition requires Google Chrome, Edge, or Brave browser.');
-      stopConversationalMode();
-      return;
-    }
-
-    setAgentStatus('listening');
-    setIsListening(true);
-    userWantsListeningRef.current = true;
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-
-    let currentTranscript = '';
-
-    const recognition = createSpeechRecognizer({
-      onTranscript: (transcript: string, isFinal: boolean) => {
-        if (!conversationalActiveRef.current) return;
-
-        // ACOUSTIC ISOLATION: Discard any audio if the assistant is speaking or playing sound!
-        const state = useAppStore.getState();
-        if (state.isSpeaking || state.playbackState === 'playing' || state.agentStatus === 'speaking' || state.agentStatus === 'thinking') {
-          return;
-        }
-
-        currentTranscript = transcript;
-        setScriptText(transcript);
-
-        if (conversationalSilenceTimerRef.current) {
-          clearTimeout(conversationalSilenceTimerRef.current);
-        }
-
-        // Intelligent sentence completion delay: waits until user completes thought
-        const delay = getSpeechCompletionDelay(transcript, isFinal, 'conversational');
-        conversationalSilenceTimerRef.current = setTimeout(() => {
-          const phrase = currentTranscript.trim();
-          currentTranscript = '';
-          if (phrase && conversationalActiveRef.current) {
-            processConversationalTurnRef.current(phrase);
-          }
-        }, delay);
-      },
-      onEnd: () => {
-        if (conversationalActiveRef.current) {
-          const state = useAppStore.getState();
-          if (!state.isSpeaking && state.playbackState !== 'playing' && state.agentStatus === 'listening') {
-            setTimeout(() => {
-              if (conversationalActiveRef.current && !useAppStore.getState().isSpeaking && useAppStore.getState().agentStatus === 'listening') {
-                startConversationalListeningRef.current();
-              }
-            }, 100);
-          }
-        } else {
-          setIsListening(false);
-        }
-      },
-      onError: (err) => {
-        console.warn('Conversational speech recognition notice:', err);
-        if (err === 'no-speech' && conversationalActiveRef.current) {
-          return;
-        }
-      }
-    });
-
-    if (recognition) {
-      try {
-        recognition.start();
-        recognitionRef.current = recognition;
-        setIsListening(true);
-      } catch (e) {
-        console.error('Could not start microphone for conversation', e);
-      }
-    }
-  }, [setError, stopConversationalMode, setAgentStatus, setIsListening, setScriptText]);
-
-  startConversationalListeningRef.current = startConversationalListening;
-  processConversationalTurnRef.current = processConversationalTurn;
-
-  const startConversationalMode = useCallback(async () => {
-    if (isStartingConversationalRef.current || conversationalActiveRef.current) return;
-    isStartingConversationalRef.current = true;
-
-    // Hard stop any other active speech, recognizers, or timers
-    stopListening();
-    if (conversationalSilenceTimerRef.current) {
-      clearTimeout(conversationalSilenceTimerRef.current);
-      conversationalSilenceTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-    voiceManager.stopAll('start_conversation');
-
-    conversationalActiveRef.current = true;
-    setIsConversationalActive(true);
-    setAgentModeType('conversational');
-    setAgentSpeed('gemini');
-    setAgentModelName('Google Gemini 3.8 Flash');
-    setAgentStatus('speaking');
-
-    // Assistant Introduction
-    const introText = "Hey there.";
-    setScriptText(introText);
-    setLastFullResponse(introText);
-
-    try {
-      await voiceManager.speakSentence(introText, () => {
-        isStartingConversationalRef.current = false;
-        if (conversationalActiveRef.current) {
-          setScriptText('');
-          startConversationalListening();
-        }
-      });
-    } catch {
-      isStartingConversationalRef.current = false;
-      if (conversationalActiveRef.current) {
-        startConversationalListening();
-      }
-    }
-  }, [setIsConversationalActive, setAgentSpeed, setAgentModelName, setAgentStatus, setScriptText, setLastFullResponse, startConversationalListening, stopListening]);
-
-  const handleConversationalBargeIn = () => {
-    voiceManager.stopAll('user_manual_interruption');
-    if (conversationalAbortControllerRef.current) {
-      conversationalAbortControllerRef.current.abort();
-      conversationalAbortControllerRef.current = null;
-    }
-    setAgentStatus('listening');
-    setIsSpeaking(false);
-    setPlaybackState('idle');
-    startConversationalListening();
-  };
-
-  const handleModeSwitch = (mode: 'agent' | 'conversational' | 'repeat') => {
-    stopListening();
-    if (conversationalSilenceTimerRef.current) {
-      clearTimeout(conversationalSilenceTimerRef.current);
-      conversationalSilenceTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-
-    if (isConversationalActive && mode !== 'conversational') {
-      stopConversationalMode();
-    }
-    if (mode === 'conversational') {
-      setAgentSpeed('gemini');
-      setAgentModelName('Google Gemini 3.8 Flash');
-    }
-    setAgentModeType(mode);
-  };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      conversationalActiveRef.current = false;
-      if (conversationalSilenceTimerRef.current) {
-        clearTimeout(conversationalSilenceTimerRef.current);
-      }
-      if (conversationalAbortControllerRef.current) {
-        conversationalAbortControllerRef.current.abort();
-      }
-    };
-  }, []);
-
-  const toggleMic = () => {
+  const toggleMic = useCallback(() => {
     if (isListening) {
+      const textToSend = (lastAccumulatedTranscriptRef.current || '').trim();
       stopListening();
-      setAgentStatus('idle');
+      if (textToSend) {
+        lastAccumulatedTranscriptRef.current = '';
+        setScriptText('');
+        handleAskAgent(textToSend);
+      } else {
+        setAgentStatus('idle');
+      }
     } else {
       voiceManager.stopAll('toggle_mic');
-      startListening();
-    }
-  };
+      if (!isSpeechRecognitionSupported()) {
+        setError('Microphone speech recognition requires Google Chrome, Edge, or Brave browser.');
+        return;
+      }
 
-  const handlePlay = () => {
-    stopListening();
-    if (playbackState === 'playing') {
-      voiceManager.stopAll('user_pause');
-      setPlaybackState('paused');
-    } else {
-      speakAndSync(scriptText, agentModeType === 'repeat');
-    }
-  };
+      setAgentStatus('listening');
+      userWantsListeningRef.current = true;
+      lastAccumulatedTranscriptRef.current = '';
 
-  const handleStop = () => {
-    if (isConversationalActive) {
-      stopConversationalMode();
-    }
-    stopListening();
-    voiceManager.stopAll('user_stop_button');
-    setAgentStatus('idle');
-    setActiveTaskSteps([]);
-    if (useAppStore.getState().agentModeType === 'repeat') {
-      setScriptText('');
-    }
-  };
+      let accumulated = '';
+      const recognition = createSpeechRecognizer({
+        onTranscript: (transcript: string, isFinal: boolean) => {
+          accumulated = transcript;
+          lastAccumulatedTranscriptRef.current = transcript;
+          setScriptText(transcript);
 
-  const handlePreviewVoice = () => {
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+          }
+
+          const isRepeat = useAppStore.getState().agentModeType === 'repeat';
+          const delay = getSpeechCompletionDelay(accumulated, isFinal, isRepeat ? 'repeat' : 'agent');
+
+          silenceTimerRef.current = setTimeout(async () => {
+            userWantsListeningRef.current = false;
+            stopListening();
+            const toProcess = (accumulated || lastAccumulatedTranscriptRef.current).trim();
+            accumulated = '';
+            lastAccumulatedTranscriptRef.current = '';
+            if (toProcess) {
+              setScriptText('');
+              if (isRepeat) {
+                await speakAndSync(toProcess, true);
+              } else {
+                await handleAskAgent(toProcess);
+              }
+            }
+          }, delay);
+        },
+        onEnd: () => {
+          setIsListening(false);
+          if (useAppStore.getState().agentStatus === 'listening') {
+            setAgentStatus('idle');
+          }
+        },
+        onError: (err) => {
+          console.warn('Speech recognition notice:', err);
+          setIsListening(false);
+          setAgentStatus('idle');
+        }
+      });
+
+      if (recognition) {
+        try {
+          recognition.start();
+          recognitionRef.current = recognition;
+          setIsListening(true);
+        } catch (e) {
+          console.error('Recognition start error:', e);
+        }
+      }
+    }
+  }, [isListening, stopListening, setAgentStatus, setError, setIsListening, setScriptText, speakAndSync, handleAskAgent]);
+
+  // Voice Selection & Instant Preview
+  const handleSelectVoice = (vId: string) => {
     stopListening();
-    const cur = voices.find(v => v.id === selectedVoice);
+    const cur = voices.find(v => v.id === vId);
     if (!cur) return;
+    setSelectedVoice(cur.id);
+    setTtsBackend(cur.backend);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('talking_character_selected_voice', cur.id);
+      } catch {}
+    }
     voiceManager.playPreview(cur);
   };
 
-  const handleQuickAction = (promptText: string) => {
-    stopListening();
-    setScriptText(promptText);
-    handleAskAgent(promptText);
+  // Clear Conversation History
+  const handleClearHistory = async () => {
+    setHistoryClearing(true);
+    await clearAgentHistory();
+    setChatHistory([]);
+    setHistoryClearing(false);
   };
 
-  const handleSelectEngine = (speed: 'grok' | 'gemini' | 'instant') => {
-    setAgentSpeed(speed as any);
-    const readable =
-      speed === 'grok'
-        ? 'xAI Grok 4.7'
-        : speed === 'gemini'
-        ? 'Google Gemini 3.8 Flash'
-        : 'Fast Instant Engine';
-    setAgentModelName(readable);
+  // Save API Key
+  const handleSaveKey = async (provider: 'gemini' | 'grok' | 'elevenlabs', val: string) => {
+    const trimmed = val.trim();
+    if (provider === 'gemini') {
+      setGeminiKey(trimmed);
+      try { localStorage.setItem('gemini_api_key', trimmed); } catch {}
+    } else if (provider === 'grok') {
+      setGrokKey(trimmed);
+      try { 
+        localStorage.setItem('grok_api_key', trimmed); 
+        localStorage.setItem('xai_api_key', trimmed); 
+      } catch {}
+    } else if (provider === 'elevenlabs') {
+      setElevenLabsKey(trimmed);
+      try { localStorage.setItem('elevenlabs_api_key', trimmed); } catch {}
+      saveElevenLabsKey(trimmed);
+    }
+
+    try {
+      await saveAgentApiKey(provider, trimmed);
+      setKeyStatuses(prev => ({ ...prev, [provider]: !!trimmed }));
+      setKeyToastMessage(`✓ ${provider.toUpperCase()} API key saved securely!`);
+      setTimeout(() => setKeyToastMessage(null), 3000);
+    } catch {
+      setKeyToastMessage(`✓ Key saved in client session`);
+      setTimeout(() => setKeyToastMessage(null), 3000);
+    }
   };
 
-  const activeEngineLabel =
-    agentSpeed === 'grok'
-      ? 'xAI Grok 4.7'
-      : agentSpeed === 'gemini'
-      ? 'Google Gemini 3.8 Flash'
-      : 'Fast Instant Engine';
+  const SCHEMA_SQL = `-- Supabase Schema for Talking Character & Personal AI Assistant
+CREATE TABLE IF NOT EXISTS public.memories (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  category TEXT DEFAULT 'fact',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  priority TEXT DEFAULT 'medium',
+  due_date TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS public.notes (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tags TEXT[] DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.reminders (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  remind_at TEXT NOT NULL,
+  triggered BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.conversations (
+  id BIGSERIAL PRIMARY KEY,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  model_used TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.user_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.memories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all anon" ON public.memories FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all anon" ON public.tasks FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all anon" ON public.notes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all anon" ON public.reminders FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all anon" ON public.conversations FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH CHECK (true);`;
+
+  const handleConnectSupabase = async () => {
+    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
+      setSupabaseToast('Please provide both Project URL and Anon/Service Key');
+      setTimeout(() => setSupabaseToast(null), 3500);
+      return;
+    }
+    setSupabaseLoading(true);
+    setSupabaseToast(null);
+    try {
+      const res = await saveSupabaseConfig(supabaseUrl.trim(), supabaseKey.trim());
+      const updatedStatus = await fetchSupabaseStatus();
+      setSupabaseStatus(updatedStatus);
+      if (res.connection?.connected) {
+        setSupabaseToast('✓ Connected to Supabase successfully!');
+      } else {
+        setSupabaseToast(`⚠️ Connected, but check schema: ${res.connection?.message || 'Tables missing'}`);
+      }
+    } catch (err: any) {
+      setSupabaseToast(`✗ Error: ${err.message || 'Failed to connect'}`);
+    } finally {
+      setSupabaseLoading(false);
+      setTimeout(() => setSupabaseToast(null), 4500);
+    }
+  };
+
+  const handleSyncSupabase = async () => {
+    setSupabaseSyncing(true);
+    setSupabaseToast(null);
+    try {
+      const res = await triggerSupabaseSync('both');
+      const updatedStatus = await fetchSupabaseStatus();
+      setSupabaseStatus(updatedStatus);
+      setSupabaseToast(`✓ Cloud sync complete! (Memories: ${res.pulled?.memories ?? 0} pulled, Tasks: ${res.pulled?.tasks ?? 0} pulled)`);
+    } catch (err: any) {
+      setSupabaseToast(`✗ Sync failed: ${err.message || 'Error syncing'}`);
+    } finally {
+      setSupabaseSyncing(false);
+      setTimeout(() => setSupabaseToast(null), 4500);
+    }
+  };
+
+  const handleCopySql = () => {
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(SCHEMA_SQL);
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 2500);
+    }
+  };
+
+  // Filter voices: exclusively ElevenLabs voice pack
+  const filteredVoices = voices.filter((v) => {
+    const isEleven = v.backend === 'elevenlabs';
+    const matchesSearch =
+      !voiceSearchQuery ||
+      v.name.toLowerCase().includes(voiceSearchQuery.toLowerCase()) ||
+      v.lang.toLowerCase().includes(voiceSearchQuery.toLowerCase()) ||
+      (v.description && v.description.toLowerCase().includes(voiceSearchQuery.toLowerCase()));
+
+    return isEleven && matchesSearch;
+  });
+
+  const quickPrompts = [
+    "Introduce yourself in 2 sentences",
+    "Tell me what tools you have access to",
+    "What is the capital of Japan?",
+    "Check system memory and diagnostics",
+  ];
 
   return (
     <>
-      {/* Refined Sidebar Toggle when collapsed - Solid Dark, NO backdrop-blur */}
-      {isCollapsed && (
-        <button
-          type="button"
-          onClick={() => setIsCollapsed(false)}
-          className="fixed top-5 right-5 z-50 px-3 py-2 rounded-xl bg-[#0F0F12] hover:bg-[#141417] border border-white/[0.08] hover:border-white/[0.14] text-white shadow-[0_16px_36px_rgba(0,0,0,0.6)] transition-[transform,background-color,border-color] duration-150 ease-out flex items-center gap-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5CF6]/50 active:scale-[0.98]"
-          title="Open Studio AI Agent Panel"
-        >
-          <PanelRightOpen size={16} strokeWidth={1.5} className="text-[#8B5CF6]" />
-          <span>Assistant</span>
-        </button>
-      )}
-
-      {/* Main Floating Application Panel - Solid Dark Layer (No GPU blur flicker) */}
-      <aside 
-        aria-label="Studio AI Agent Control Panel"
-        className={`fixed right-5 top-5 bottom-5 w-[370px] max-md:w-[92vw] max-md:right-[4vw] z-40 transition-[transform,opacity] duration-200 ease-out transform-gpu pointer-events-auto ${
-          isCollapsed ? 'translate-x-[400px] opacity-0 pointer-events-none' : 'translate-x-0 opacity-100'
+      <aside
+        aria-label="Studio AI Inspector & Settings Drawer"
+        className={`fixed right-4 top-4 bottom-4 w-[480px] lg:w-[540px] xl:w-[580px] max-md:w-[94vw] max-md:right-[3vw] z-50 transition-all duration-300 ease-out transform-gpu pointer-events-auto ${
+          isCollapsed 
+            ? 'translate-x-[460px] opacity-0 pointer-events-none' 
+            : 'translate-x-0 opacity-100'
         }`}
       >
-        <div className={`h-full ${SURFACES.panelShell} p-4 flex flex-col gap-3 overflow-y-auto custom-scrollbar`}>
+        {/* ── Solid Charcoal Shell (#181818) ── */}
+        <div className="h-full bg-[#0D0F17]/92 backdrop-blur-3xl border border-white/[0.08] rounded-3xl shadow-[0_24px_80px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden">
 
-          {/* ── 1. Header Card ── */}
-          <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-3.5 flex items-center justify-between">
-            <div className="flex flex-col gap-0.5">
-              <h1 className={TYPO.title}>
-                STUDIO AI AGENT
-              </h1>
-              <span className={TYPO.caption}>
-                Local Digital Personal Assistant
-              </span>
+          {/* ── 1. Drawer Header ── */}
+          <div className="px-5 py-4 border-b border-white/[0.07] bg-[#131622]/40 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-[#202126] border border-[#2A2C33] flex items-center justify-center text-[#6E8BFF]">
+                <Sparkles size={17} strokeWidth={1.75} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold tracking-wide uppercase text-[#F2F2F2] font-sans">
+                  AI STUDIO
+                </h2>
+                <p className="text-[11px] text-[#A7A9AF] font-normal tracking-normal">
+                  Assistant Telemetry & Studio Controls
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0A0A0C] border border-white/[0.06] text-[11px] font-mono text-white/60">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#202126] border border-[#2A2C33] text-[11px] font-mono text-[#A7A9AF]">
                 <span className={agentHealthInfo.connected ? STATUS_DOTS.success : STATUS_DOTS.danger} />
-                <span className="tracking-wide">{agentHealthInfo.connected ? 'CONNECTED' : 'OFFLINE'}</span>
+                <span className="tracking-wide">{agentHealthInfo.connected ? 'ONLINE' : 'OFFLINE'}</span>
               </div>
 
               <button
                 type="button"
-                onClick={() => setIsCollapsed(true)}
-                className={BUTTONS.icon}
-                title="Minimize Panel"
+                onClick={() => {
+                  setIsCollapsed(true);
+                  setStoreNavTab('home');
+                }}
+                className="w-8 h-8 rounded-full bg-[#202126] border border-[#2A2C33] flex items-center justify-center text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-[#282932] active:scale-95 transition shadow-sm"
+                title="Close Drawer"
               >
-                <X size={15} strokeWidth={1.5} />
+                <X size={15} strokeWidth={1.75} />
               </button>
             </div>
           </div>
 
-          {/* ── 2. Top-Level Tab Switcher (Calm Density Architecture) ── */}
-          <div className="grid grid-cols-2 gap-1 p-1 bg-[#0A0A0C] border border-white/[0.04] rounded-xl">
-            <button
-              type="button"
-              onClick={() => setActiveNavTab('assistant')}
-              className={`py-2 px-3 rounded-lg text-xs font-medium transition-[transform,background-color,color] duration-150 ease-out flex items-center justify-center gap-2 active:scale-[0.98] ${
-                activeNavTab === 'assistant'
-                  ? 'bg-white/[0.08] text-white shadow-sm font-semibold'
-                  : 'text-white/50 hover:text-white/80 hover:bg-white/[0.03]'
-              }`}
-            >
-              <Bot size={14} strokeWidth={1.5} className={activeNavTab === 'assistant' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-              <span>Assistant</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveNavTab('studio')}
-              className={`py-2 px-3 rounded-lg text-xs font-medium transition-[transform,background-color,color] duration-150 ease-out flex items-center justify-center gap-2 active:scale-[0.98] ${
-                activeNavTab === 'studio'
-                  ? 'bg-white/[0.08] text-white shadow-sm font-semibold'
-                  : 'text-white/50 hover:text-white/80 hover:bg-white/[0.03]'
-              }`}
-            >
-              <Sliders size={14} strokeWidth={1.5} className={activeNavTab === 'studio' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-              <span>Studio & Settings</span>
-            </button>
+          {/* ── 2. Top-Level Tab Switcher ── */}
+          <div className="p-3 border-b border-white/[0.07] bg-[#131622]/20">
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#131622]/80 border border-white/[0.08] rounded-full">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('chat');
+                  setStoreNavTab('chat');
+                  loadHistory();
+                }}
+                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
+                  activeTab === 'chat'
+                    ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold shadow-sm'
+                    : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
+                }`}
+              >
+                <MessageSquare size={14} strokeWidth={2} />
+                <span>Chat</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('voice');
+                  setStoreNavTab('voice');
+                }}
+                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
+                  activeTab === 'voice'
+                    ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold shadow-sm'
+                    : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
+                }`}
+              >
+                <Mic size={14} strokeWidth={2} />
+                <span>Voice</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('settings');
+                  setStoreNavTab('settings');
+                }}
+                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
+                  activeTab === 'settings'
+                    ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold shadow-sm'
+                    : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
+                }`}
+              >
+                <Sliders size={14} strokeWidth={2} />
+                <span>Settings</span>
+              </button>
+            </div>
           </div>
 
+        {/* ── 3. Scrollable Tab Content ── */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+
           {/* ══════════════════════════════════════════════════════════════ */}
-          {/* TAB 1: ASSISTANT (The focused core conversational loop)     */}
+          {/* TAB 1: CHAT & PERSISTENT SESSION MEMORY                     */}
           {/* ══════════════════════════════════════════════════════════════ */}
-          {activeNavTab === 'assistant' && (
-            <>
-              {/* ── 3. AI Mode Switcher (Segmented Control: Agent, Converse, Repeat) ── */}
-              <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-2.5">
-                <div className="grid grid-cols-3 gap-1 p-1 bg-[#0A0A0C] border border-white/[0.04] rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => handleModeSwitch('agent')}
-                    className={`py-1.5 px-1.5 rounded-lg text-[10.5px] font-semibold uppercase tracking-wider transition-[transform,background-color,color,box-shadow] duration-150 ease-out flex items-center justify-center gap-1 active:scale-[0.98] ${
-                      agentModeType === 'agent'
-                        ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-[0_1px_8px_rgba(139,92,246,0.3)]'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                    title="Full agent mode: reasoning, memory, and local tool execution"
-                  >
-                    <Bot size={13} strokeWidth={1.5} />
-                    <span>AGENT</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleModeSwitch('conversational')}
-                    className={`py-1.5 px-1.5 rounded-lg text-[10.5px] font-semibold uppercase tracking-wider transition-[transform,background-color,color,box-shadow] duration-150 ease-out flex items-center justify-center gap-1 active:scale-[0.98] ${
-                      agentModeType === 'conversational'
-                        ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-[0_1px_8px_rgba(139,92,246,0.3)]'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                    title="Natural conversational duplex mode: fast listen-think-respond loop with streaming & barge-in interruption"
-                  >
-                    <MessageSquare size={13} strokeWidth={1.5} />
-                    <span>CONVERSE</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleModeSwitch('repeat')}
-                    className={`py-1.5 px-1.5 rounded-lg text-[10.5px] font-semibold uppercase tracking-wider transition-[transform,background-color,color,box-shadow] duration-150 ease-out flex items-center justify-center gap-1 active:scale-[0.98] ${
-                      agentModeType === 'repeat'
-                        ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-[0_1px_8px_rgba(139,92,246,0.3)]'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                    title="Direct speech synthesis & voice repeat"
-                  >
-                    <Repeat size={13} strokeWidth={1.5} />
-                    <span>REPEAT</span>
-                  </button>
-                </div>
+          {activeTab === 'chat' && (
+            <div className="h-full flex flex-col min-h-0 -m-5">
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {chatViewMode === 'chat' ? (
+                  <SessionChatPanel
+                    onBackToSessions={() => setChatViewMode('sessions')}
+                    showBackControl={false}
+                  />
+                ) : (
+                  <SessionSidebar
+                    onSessionSelect={() => setChatViewMode('chat')}
+                  />
+                )}
               </div>
-
-              {/* ── 3b. Fluid Voice Orb Card (Minimalist Voice Hub) ── */}
-              {agentModeType === 'conversational' && (
-                <div className="bg-[#121215] rounded-2xl border border-white/[0.08] p-6 flex flex-col items-center justify-center gap-6 relative overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] my-2">
-                  {/* Atmospheric ambient background glow */}
-                  <div className={`absolute w-56 h-56 rounded-full blur-3xl pointer-events-none transition-all duration-700 ${
-                    agentStatus === 'listening'
-                      ? 'bg-emerald-500/20'
-                      : agentStatus === 'thinking'
-                      ? 'bg-violet-600/25'
-                      : agentStatus === 'speaking'
-                      ? 'bg-cyan-500/25'
-                      : 'bg-[#8B5CF6]/20'
-                  }`} />
-
-                  {/* The Voice Orb Ball */}
-                  <div 
-                    onClick={() => {
-                      if (!isConversationalActive) {
-                        startConversationalMode();
-                      } else if (agentStatus === 'speaking' || playbackState === 'playing') {
-                        handleConversationalBargeIn();
-                      }
-                    }}
-                    className="relative w-48 h-48 flex items-center justify-center cursor-pointer group select-none my-2"
-                    title={
-                      !isConversationalActive
-                        ? 'Click to Start Voice Conversation'
-                        : agentStatus === 'speaking'
-                        ? 'Click Orb to Interrupt'
-                        : 'Voice Conversation Active'
-                    }
-                  >
-                    {/* Concentric Animated Soundwave Ripple Rings */}
-                    {isConversationalActive && (
-                      <>
-                        <div className={`absolute inset-0 rounded-full border animate-ring-pulse ${
-                          agentStatus === 'listening' ? 'border-emerald-400/40' : 'border-[#8B5CF6]/40'
-                        }`} />
-                        <div className={`absolute -inset-4 rounded-full border animate-ring-pulse [animation-delay:0.8s] ${
-                          agentStatus === 'listening' ? 'border-emerald-400/20' : 'border-[#38BDF8]/25'
-                        }`} />
-                      </>
-                    )}
-
-                    {/* Luminous Animated Voice Orb Ball */}
-                    <div className={`relative w-36 h-36 rounded-full transition-all duration-500 transform group-hover:scale-105 active:scale-95 ${
-                      !isConversationalActive
-                        ? 'bg-[radial-gradient(circle_at_32%_30%,#FFFFFF_0%,#A78BFA_28%,#8B5CF6_55%,#3B82F6_82%,#10B981_100%)] animate-orb-breathe animate-orb-morph shadow-[0_0_55px_rgba(139,92,246,0.5),0_0_95px_rgba(56,189,248,0.3)]'
-                        : agentStatus === 'listening'
-                        ? 'bg-[radial-gradient(circle_at_32%_30%,#FFFFFF_0%,#6EE7B7_28%,#10B981_55%,#06B6D4_82%,#8B5CF6_100%)] animate-orb-listening shadow-[0_0_70px_rgba(16,185,129,0.65),0_0_120px_rgba(56,189,248,0.45)]'
-                        : agentStatus === 'thinking'
-                        ? 'bg-[radial-gradient(circle_at_32%_30%,#FFFFFF_0%,#C084FC_28%,#8B5CF6_55%,#4F46E5_82%,#06B6D4_100%)] animate-orb-thinking shadow-[0_0_70px_rgba(139,92,246,0.65),0_0_120px_rgba(192,132,252,0.45)]'
-                        : 'bg-[radial-gradient(circle_at_32%_30%,#FFFFFF_0%,#93C5FD_25%,#8B5CF6_55%,#EC4899_80%,#3B82F6_100%)] animate-orb-speaking shadow-[0_0_80px_rgba(139,92,246,0.75),0_0_140px_rgba(96,165,250,0.55)]'
-                    }`}>
-                      {/* Pearlescent Specular Glass Highlights */}
-                      <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/40 via-transparent to-black/25 pointer-events-none" />
-                      <div className="absolute top-3 left-5 w-10 h-5 rounded-full bg-white/45 blur-[1.5px] transform -rotate-12 pointer-events-none" />
-                      <div className="absolute bottom-3.5 right-5 w-8 h-3.5 rounded-full bg-white/20 blur-[2px] transform rotate-12 pointer-events-none" />
-                    </div>
-                  </div>
-
-                  {/* Status Indicator (Only when active) */}
-                  {isConversationalActive && (
-                    <div className="flex flex-col items-center gap-2 w-full">
-                      <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#0A0A0C] border border-white/[0.08] text-xs font-medium text-white/90">
-                        {agentStatus === 'listening' ? (
-                          <>
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#34D399]" />
-                            <span>Listening...</span>
-                          </>
-                        ) : agentStatus === 'thinking' ? (
-                          <>
-                            <Loader2 size={12} strokeWidth={2} className="text-[#8B5CF6] animate-spin" />
-                            <span>Thinking...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#38BDF8]" />
-                            <span>Speaking (tap orb to interrupt)</span>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Live Transcription Bubble — always in DOM to prevent layout shift on words */}
-                      <div className={`w-full bg-[#0A0A0C]/90 border border-white/[0.06] rounded-xl px-3 py-2 text-xs text-white/70 italic text-center max-h-16 overflow-y-auto custom-scrollbar transition-opacity duration-150 ${scriptText ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                        "{scriptText}"
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ONE Single Action Button */}
-                  {!isConversationalActive ? (
-                    <button
-                      type="button"
-                      onClick={startConversationalMode}
-                      className="w-full h-12 rounded-xl text-xs font-semibold bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] hover:from-[#7C3AED] hover:to-[#6D28D9] text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] flex items-center justify-center gap-2.5 transition-[transform,box-shadow] duration-150 ease-out active:scale-[0.98]"
-                    >
-                      <Radio size={16} strokeWidth={1.5} className="animate-pulse" />
-                      <span>Start Conversation</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={stopConversationalMode}
-                      className="w-full h-11 rounded-xl text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 hover:text-rose-200 border border-rose-500/30 flex items-center justify-center gap-2 transition-[transform,background-color] duration-150 ease-out active:scale-[0.98]"
-                    >
-                      <Square size={13} strokeWidth={1.5} />
-                      <span>End Conversation</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* ── 4. Engine Selection Card (Unified Neutral + Violet System - Shown for Agent Mode Only) ── */}
-              {agentModeType === 'agent' && (
-                <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-3.5 flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className={TYPO.label}>
-                      Engine
-                    </span>
-                    <span className={TYPO.mono}>
-                      {agentSpeed === 'instant' ? '<0.1s' : '~0.4s'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {/* Gemini 3.8 Flash Card */}
-                    <button
-                      type="button"
-                      onClick={() => handleSelectEngine('gemini')}
-                      className={`p-2.5 text-left flex flex-col gap-1 ${
-                        agentSpeed === 'gemini'
-                          ? SURFACES.cardSelected
-                          : SURFACES.cardInteractive
-                      }`}
-                      title="Google Gemini 3.8 Flash (Google AI Cloud)"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium flex items-center gap-1.5 text-white">
-                          <Sparkles size={13} strokeWidth={1.5} className={agentSpeed === 'gemini' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-                          Gemini 3.8
-                        </span>
-                        <span className={TYPO.mono}>~0.3s</span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-white/45 leading-tight">
-                        <span>Flash · Fast</span>
-                        {keyStatuses.gemini && <span className={STATUS_DOTS.success} title="Key Configured" />}
-                      </div>
-                    </button>
-
-
-
-                    {/* Grok 4.7 Card */}
-                    <button
-                      type="button"
-                      onClick={() => handleSelectEngine('grok')}
-                      className={`p-2.5 text-left flex flex-col gap-1 ${
-                        agentSpeed === 'grok'
-                          ? SURFACES.cardSelected
-                          : SURFACES.cardInteractive
-                      }`}
-                      title="xAI Grok 4.7 Flagship Intelligence (Cloud)"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium flex items-center gap-1.5 text-white">
-                          <Sparkles size={13} strokeWidth={1.5} className={agentSpeed === 'grok' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-                          Grok 4.7
-                        </span>
-                        <span className={TYPO.mono}>~0.4s</span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-white/45 leading-tight">
-                        <span>xAI Cloud</span>
-                        {keyStatuses.grok && <span className={STATUS_DOTS.success} title="Key Configured" />}
-                      </div>
-                    </button>
-                  </div>
-
-                  {/* Instant Engine Card */}
-                  <button
-                    type="button"
-                    onClick={() => handleSelectEngine('instant')}
-                    className={`p-2.5 flex items-center justify-between ${
-                      agentSpeed === 'instant'
-                        ? SURFACES.cardSelected
-                        : SURFACES.cardInteractive
-                    }`}
-                    title="Instantaneous response (< 0.1s) with local knowledge engine & real-time tools"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Zap size={13} strokeWidth={1.5} className={agentSpeed === 'instant' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-                      <span className="text-xs font-medium text-white">Fast Local Engine</span>
-                      <span className="text-[11px] text-white/40">Wikipedia + Math</span>
-                    </div>
-                    <span className={TYPO.mono}>&lt;0.1s</span>
-                  </button>
-                </div>
-              )}
-
-              {/* ── 5. Dominant Primary Action (Speak to Assistant - Shown for Agent & Repeat modes) ── */}
-              {agentModeType !== 'conversational' && (
-                <button
-                  type="button"
-                  onClick={toggleMic}
-                  className={`w-full h-12 rounded-xl text-xs font-semibold flex items-center justify-center gap-2.5 transition-[transform,filter,background-color,box-shadow] duration-150 ease-out active:scale-[0.98] relative overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5CF6]/60 focus-visible:ring-offset-1 focus-visible:ring-offset-[#0F0F12] ${
-                    isListening
-                      ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-[0_0_24px_rgba(244,63,94,0.4)]'
-                      : BUTTONS.primary
-                  }`}
-                >
-                  {isListening ? (
-                    <>
-                      <span className="relative flex h-2.5 w-2.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white" />
-                      </span>
-                      <MicOff size={16} strokeWidth={1.5} />
-                      <span>Listening... Speak Now</span>
-                    </>
-                  ) : (
-                    <>
-                      <Mic size={16} strokeWidth={1.5} />
-                      <span>Speak to Assistant</span>
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* ── 6. AI Command Composer Card & 7. Dashboard (Hidden in Conversational Mode for minimalist orb experience) ── */}
-              {agentModeType !== 'conversational' && (
-                <>
-                  <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-3.5 flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className={TYPO.label}>
-                        Prompt / Instructions
-                      </span>
-                      {scriptText && (
-                        <button
-                          type="button"
-                          onClick={() => setScriptText('')}
-                          className="text-[11px] text-white/40 hover:text-white/80 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20 rounded px-1.5 py-0.5"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Composer Box */}
-                    <div className="bg-[#0A0A0C] border border-white/[0.08] focus-within:border-[#8B5CF6]/60 focus-within:ring-1 focus-within:ring-[#8B5CF6]/30 rounded-xl p-3 flex flex-col gap-2 transition-[border-color,box-shadow] duration-150 ease-out">
-                      <textarea
-                        value={scriptText}
-                        onChange={(e) => setScriptText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            if (scriptText.trim() && playbackState !== 'loading') {
-                              stopListening();
-                              if (agentModeType === 'repeat') {
-                                speakAndSync(scriptText, true);
-                              } else {
-                                handleAskAgent(scriptText);
-                              }
-                            }
-                          }
-                        }}
-                        placeholder={agentModeType === 'repeat' ? 'Type text to speak instantly...' : 'Ask anything...'}
-                        rows={3}
-                        className="w-full bg-transparent text-white text-xs leading-relaxed resize-none focus:outline-none placeholder:text-white/30 custom-scrollbar"
-                      />
-
-                      {/* Internal Composer Toolbar */}
-                      <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
-                        <span className="text-[11px] text-white/40 font-mono flex items-center gap-1">
-                          <span>Enter</span>
-                          <CornerDownLeft size={10} strokeWidth={1.5} />
-                          <span>{agentModeType === 'repeat' ? 'to speak' : 'to ask'}</span>
-                        </span>
-
-                        <div className="flex items-center gap-1.5">
-                          {/* Speech Direct Play/Stop Controls */}
-                          {playbackState === 'playing' ? (
-                            <button
-                              type="button"
-                              onClick={handlePlay}
-                              className="w-7 h-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-white flex items-center justify-center transition-[transform,background-color] duration-150 ease-out active:scale-[0.98] focus-visible:ring-1 focus-visible:ring-[#8B5CF6]/50"
-                              title="Pause Speech"
-                            >
-                              <Pause size={13} strokeWidth={1.5} />
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={handlePlay}
-                              disabled={!scriptText.trim()}
-                              className="w-7 h-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-30 text-white/70 hover:text-white flex items-center justify-center transition-[transform,background-color,color] duration-150 ease-out active:scale-[0.98] focus-visible:ring-1 focus-visible:ring-[#8B5CF6]/50"
-                              title="Play Text Directly"
-                            >
-                              <Play size={13} strokeWidth={1.5} />
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={handleStop}
-                            className="w-7 h-7 rounded-lg bg-transparent hover:bg-white/[0.04] text-white/40 hover:text-white/80 flex items-center justify-center transition-[transform,background-color,color] duration-150 ease-out active:scale-[0.98] focus-visible:ring-1 focus-visible:ring-[#8B5CF6]/50"
-                            title="Stop Audio"
-                          >
-                            <Square size={12} strokeWidth={1.5} />
-                          </button>
-
-                          {/* Action Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (scriptText.trim() && playbackState !== 'loading') {
-                                stopListening();
-                                if (agentModeType === 'repeat') {
-                                speakAndSync(scriptText, true);
-                              } else {
-                                handleAskAgent(scriptText);
-                              }
-                            }
-                          }}
-                          disabled={!scriptText.trim() || playbackState === 'loading'}
-                          className={`h-7 px-3 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1.5 transition-[transform,filter,opacity] duration-150 ease-out active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed ${
-                            scriptText.trim()
-                              ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] hover:brightness-110 text-white shadow-[0_1px_8px_rgba(139,92,246,0.25)]'
-                              : 'bg-white/[0.04] text-white/50 border border-white/[0.06]'
-                          }`}
-                        >
-                          {playbackState === 'loading' ? (
-                            <Loader2 size={13} strokeWidth={1.5} className="animate-spin" />
-                          ) : (
-                            <>
-                              <span>{agentModeType === 'repeat' ? 'Speak' : 'Send'}</span>
-                              {agentModeType === 'repeat' ? (
-                                <Volume2 size={12} strokeWidth={1.5} />
-                              ) : (
-                                <Send size={11} strokeWidth={1.5} />
-                              )}
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Quick Action Pills Toolbar */}
-                  <div className="flex flex-wrap gap-1.5 pt-0.5">
-                    {[
-                      { label: 'Files', icon: Folder, prompt: 'List files in my project' },
-                      { label: 'System', icon: HardDrive, prompt: 'Check system resources' },
-                      { label: 'Tasks', icon: CheckSquare, prompt: 'What are my tasks?' },
-                      { label: 'Memory', icon: Brain, prompt: 'What do you remember about me?' },
-                      { label: 'Help', icon: HelpCircle, prompt: 'What can you do for me?' }
-                    ].map((pill, i) => {
-                      const IconComp = pill.icon;
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => handleQuickAction(pill.prompt)}
-                          className="px-2.5 py-1 rounded-lg bg-[#0A0A0C] hover:bg-[#161619] border border-white/[0.06] hover:border-white/[0.12] text-white/60 hover:text-white text-[11px] font-medium flex items-center gap-1.5 transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.98] focus-visible:ring-1 focus-visible:ring-[#8B5CF6]/50"
-                        >
-                          <IconComp size={11} strokeWidth={1.5} className="text-white/40" />
-                          <span>{pill.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* ── 7. Assistant Technical Status Dashboard Card ── */}
-                <div className="bg-[#141417] border border-white/[0.06] rounded-xl p-3.5 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className={TYPO.label}>
-                      Active AI Engine
-                    </span>
-                    <span className="text-[11px] font-medium text-white flex items-center gap-1.5">
-                      <Sparkles size={11} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                      {activeEngineLabel}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-white/[0.04]">
-                    <span className={`px-2 py-0.5 rounded-lg border text-[10px] font-medium flex items-center gap-1.5 ${
-                      agentSpeed === 'instant' || (agentSpeed === 'gemini' && keyStatuses.gemini) || (agentSpeed === 'grok' && keyStatuses.grok)
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                        : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        agentSpeed === 'instant' || (agentSpeed === 'gemini' && keyStatuses.gemini) || (agentSpeed === 'grok' && keyStatuses.grok)
-                          ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
-                          : 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]'
-                      }`} />
-                      <span>
-                        {agentSpeed === 'instant'
-                          ? 'Local Engine'
-                          : (agentSpeed === 'gemini' && keyStatuses.gemini) || (agentSpeed === 'grok' && keyStatuses.grok)
-                          ? 'Cloud Connected'
-                          : 'Key Needed'}
-                      </span>
-                    </span>
-                    <span className="px-2 py-0.5 rounded-lg bg-[#0A0A0C] border border-white/[0.04] text-white/60 text-[10px]">
-                      Memory Ready
-                    </span>
-                    <span className="px-2 py-0.5 rounded-lg bg-[#0A0A0C] border border-white/[0.04] text-white/60 text-[10px]">
-                      {agentHealthInfo.toolsCount} Tools
-                    </span>
-                    <span className="px-2 py-0.5 rounded-lg bg-[#0A0A0C] border border-white/[0.04] text-white/60 text-[10px]">
-                      Voice Ready
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-            </>
+            </div>
           )}
 
           {/* ══════════════════════════════════════════════════════════════ */}
-          {/* TAB 2: STUDIO & CONFIG (Secondary controls one click away)  */}
+          {/* TAB 2: VOICE STUDIO & SPEECH                                 */}
           {/* ══════════════════════════════════════════════════════════════ */}
-          {activeNavTab === 'studio' && (
-            <>
-              {/* ── 8. Studio & Camera Card ── */}
-              <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-4 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className={TYPO.label}>
-                    Studio & Camera
-                  </span>
-                  <label className="text-[11px] text-[#8B5CF6] hover:text-white cursor-pointer transition-colors flex items-center gap-1 focus-within:ring-1 focus-within:ring-[#8B5CF6]/50 rounded px-1.5 py-0.5">
-                    <Upload size={11} strokeWidth={1.5} />
-                    <span>Upload GLB</span>
-                    <input
-                      type="file"
-                      accept=".glb,.gltf"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          const url = URL.createObjectURL(file);
-                          setCustomGlbUrl(url);
-                          setSceneTheme('custom_glb');
-                        }
-                      }}
+          {activeTab === 'voice' && (
+            <div className="space-y-5">
+              {/* ElevenLabs Voice Pack Banner */}
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#202126] border border-[#2A2C33]">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-[#6E8BFF]/15 border border-[#6E8BFF]/30 flex items-center justify-center text-[#6E8BFF] shrink-0">
+                    <Sparkles size={16} strokeWidth={1.75} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-semibold text-[#F2F2F2] font-sans truncate">
+                      ElevenLabs Voice Pack
+                    </h3>
+                    <p className="text-[10px] text-[#A7A9AF] font-mono">
+                      {filteredVoices.length} Premium Neural Voice{filteredVoices.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] px-2.5 py-1 rounded-full bg-[#6E8BFF]/20 text-[#6E8BFF] font-mono uppercase font-semibold border border-[#6E8BFF]/30 tracking-wide shrink-0">
+                  Active Pack
+                </span>
+              </div>
+
+              {/* Voice Search */}
+              <div className="relative">
+                <Search size={16} strokeWidth={1.5} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#A7A9AF]" />
+                <input
+                  type="text"
+                  value={voiceSearchQuery}
+                  onChange={(e) => setVoiceSearchQuery(e.target.value)}
+                  placeholder="Search voices by name or language..."
+                  className="w-full bg-[#202126] border border-[#2A2C33] focus:border-[#6E8BFF]/60 focus:ring-1 focus:ring-[#6E8BFF]/30 rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#F2F2F2] placeholder-[#A7A9AF]/50 focus:outline-none transition font-sans"
+                />
+              </div>
+
+              {/* Voice Catalog List with Gaps */}
+              <div className="flex flex-col gap-2.5 max-h-[340px] overflow-y-auto custom-scrollbar pr-1">
+                {filteredVoices.map((voice) => {
+                  const isSelected = selectedVoice === voice.id;
+
+                  return (
+                    <div
+                      key={voice.id}
+                      onClick={() => handleSelectVoice(voice.id)}
+                      className={`p-3 rounded-2xl border transition-all duration-150 flex items-center justify-between cursor-pointer active:scale-[0.99] ${
+                        isSelected
+                          ? 'bg-[#202126] border-[#6E8BFF]/60 shadow-[0_0_16px_rgba(110,139,255,0.15)] ring-1 ring-[#6E8BFF]/30'
+                          : 'bg-[#181818] border border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectVoice(voice.id);
+                          }}
+                          className="w-9 h-9 rounded-full bg-[#202126] hover:bg-[#6E8BFF] text-[#A7A9AF] hover:text-[#0B0D12] flex items-center justify-center transition active:scale-90 shrink-0 border border-[#2A2C33] hover:border-transparent shadow-sm"
+                          title="Select and preview voice sample"
+                        >
+                          <Play size={14} strokeWidth={2} />
+                        </button>
+                        <div className="min-w-0">
+                          <p className={`text-xs truncate font-sans ${isSelected ? 'font-semibold text-[#F2F2F2]' : 'text-[#F2F2F2]/80 font-medium'}`}>
+                            {voice.name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] font-mono text-[#A7A9AF]">{voice.lang}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#6E8BFF]/15 text-[#6E8BFF] font-mono uppercase font-semibold">
+                              ElevenLabs
+                            </span>
+                            {voice.description && (
+                              <span className="text-[10px] text-[#A7A9AF]/70 truncate max-w-[160px] font-sans">
+                                &bull; {voice.description}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {isSelected && (
+                        <div className="w-6 h-6 rounded-full bg-[#6E8BFF] text-[#0B0D12] flex items-center justify-center shrink-0 shadow-sm">
+                          <Check size={13} strokeWidth={2.5} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Speech Sliders: Pitch, Rate, Lip-Sync */}
+              <div className="bg-[#202126] rounded-2xl border border-[#2A2C33] p-4 space-y-4">
+                {/* Lip Sync Delay Calibration */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[#F2F2F2]/90 font-medium font-sans">Lip-Sync Calibration Delay</span>
+                    <span className="font-mono text-[#6E8BFF] text-[11px] font-semibold">{lipSyncDelayMs} ms</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={60}
+                    max={250}
+                    step={5}
+                    value={lipSyncDelayMs}
+                    onChange={(e) => setLipSyncDelayMs(Number(e.target.value))}
+                    className="w-full h-1.5 bg-[#181818] rounded-lg appearance-none cursor-pointer accent-[#6E8BFF]"
+                  />
+                  <p className="text-[10px] text-[#A7A9AF]/70 font-sans">
+                    Fine-tune phoneme timing with bluetooth or speaker latency. Default is 0ms.
+                  </p>
+                </div>
+
+                {/* Practice Auto-Repeat Toggle */}
+                <div className="flex items-center justify-between pt-3 border-t border-[#2A2C33]">
+                  <div>
+                    <span className="text-xs font-medium text-[#F2F2F2]/90 block font-sans">Pronunciation Practice</span>
+                    <span className="text-[10px] text-[#A7A9AF]/70 block font-sans">Repeats user microphone speech automatically</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !autoRepeat;
+                      setAutoRepeat(next);
+                      setAgentModeType(next ? 'repeat' : 'agent');
+                    }}
+                    className={`w-11 h-6 rounded-full transition-colors relative p-0.5 ${
+                      autoRepeat ? 'bg-[#6E8BFF]' : 'bg-[#181818] border border-[#2A2C33]'
+                    }`}
+                  >
+                    <div
+                      className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                        autoRepeat ? 'translate-x-5' : 'translate-x-0'
+                      }`}
                     />
-                  </label>
-                </div>
-
-                {/* Camera View Presets */}
-                <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#0A0A0C] border border-white/[0.04] rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setActiveCamera('wide')}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-medium transition-[transform,background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 active:scale-[0.98] ${
-                      activeCamera === 'wide'
-                        ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-[0_1px_8px_rgba(139,92,246,0.3)]'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    <Maximize2 size={12} strokeWidth={1.5} />
-                    <span>Studio Wide</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveCamera('closeup')}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-medium transition-[transform,background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 active:scale-[0.98] ${
-                      activeCamera === 'closeup'
-                        ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-[0_1px_8px_rgba(139,92,246,0.3)]'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    <Focus size={12} strokeWidth={1.5} />
-                    <span>Close-up</span>
-                  </button>
-                </div>
-
-                {/* Background Theme Switcher */}
-                <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#0A0A0C] border border-white/[0.04] rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setSceneTheme('creator_loft')}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-medium transition-[transform,background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 active:scale-[0.98] ${
-                      sceneTheme === 'creator_loft'
-                        ? 'bg-white/[0.08] text-white font-semibold shadow-sm'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    <Coffee size={12} strokeWidth={1.5} />
-                    <span>Creator Loft</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSceneTheme('broadcast_studio')}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-medium transition-[transform,background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 active:scale-[0.98] ${
-                      sceneTheme === 'broadcast_studio'
-                        ? 'bg-white/[0.08] text-white font-semibold shadow-sm'
-                        : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    <Tv size={12} strokeWidth={1.5} />
-                    <span>News Studio</span>
                   </button>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* ── 9. Voice Packs Card ── */}
-              <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-4 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className={TYPO.label}>
-                    Voice Packs
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handlePreviewVoice}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-white/70 hover:text-white transition-[transform,background-color,color] duration-150 ease-out flex items-center gap-1 active:scale-[0.98]"
-                  >
-                    <Play size={10} strokeWidth={1.5} />
-                    <span>Preview Voice</span>
-                  </button>
-                </div>
+          {/* ══════════════════════════════════════════════════════════════ */}
+          {/* TAB 3: PREFERENCES (Clean — no tech details exposed)         */}
+          {/* ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'settings' && (
+            <div className="space-y-5">
 
-                {/* Category Filter Pills */}
-                <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-0.5">
+              {/* Intelligence Mode */}
+              <div className="space-y-3">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-[#A7A9AF] font-mono">
+                  Intelligence Mode
+                </span>
+                <div className="grid grid-cols-1 gap-2.5">
                   {[
-                    { id: 'all', label: 'All', count: voices.length },
-                    { id: 'azure', label: 'Neural HD', count: voices.filter(v => v.backend === 'azure').length },
-                    { id: 'elevenlabs', label: 'ElevenLabs', count: voices.filter(v => v.backend === 'elevenlabs').length },
-                    { id: 'webSpeech', label: 'Local', count: voices.filter(v => v.backend === 'webSpeech').length },
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setVoiceFilterTab(tab.id as any)}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors ${
-                        voiceFilterTab === tab.id
-                          ? 'bg-[#8B5CF6]/25 text-[#A78BFA] border border-[#8B5CF6]/40'
-                          : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      {tab.label} ({tab.count})
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 max-h-52 overflow-y-auto custom-scrollbar pr-1">
-                  {(voiceFilterTab === 'all' ? voices : voices.filter(v => v.backend === voiceFilterTab)).map((v) => {
-                    const isSelected = v.id === selectedVoice;
+                    { id: 'gemini' as const, label: 'Balanced', desc: 'Fast and smart — great for most conversations' },
+                    { id: 'langgraph' as const, label: 'Deep Think', desc: 'Best for complex problems and detailed analysis' },
+                    { id: 'instant' as const, label: 'Lightning', desc: 'Instant responses, works offline' }
+                  ].map((mode) => {
+                    const isSelected = agentSpeed === mode.id;
                     return (
-                      <button
-                        key={v.id}
-                        type="button"
+                      <div
+                        key={mode.id}
                         onClick={() => {
-                          setSelectedVoice(v.id);
-                          if (typeof window !== 'undefined') {
-                            try { localStorage.setItem('talking_character_selected_voice', v.id); } catch {}
-                          }
-                          voiceManager.playPreview(v);
+                          setAgentSpeed(mode.id);
+                          setAgentModelName(mode.label);
                         }}
-                        className={`p-2.5 rounded-xl text-left transition-[transform,border-color,background-color,box-shadow] duration-150 ease-out border flex flex-col gap-1 active:scale-[0.98] ${
+                        className={`p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between ${
                           isSelected
-                            ? 'bg-[#101013] border-[#8B5CF6]/70 ring-1 ring-[#8B5CF6]/50 shadow-[0_0_16px_rgba(139,92,246,0.18)] text-white'
-                            : 'bg-[#101013] border-white/[0.06] hover:border-white/[0.12] text-white/70 hover:text-white'
+                            ? 'bg-[#202126] border-[#6E8BFF]/60 ring-1 ring-[#6E8BFF]/25'
+                            : 'bg-[#181818] border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className={`text-xs font-medium truncate ${isSelected ? 'text-white' : 'text-white/80'}`}>
-                            {v.name.replace(/\(ElevenLabs\)|\(Neural\)|\(Female\)/g, '').trim()}
-                          </span>
-                          <Volume2 size={12} strokeWidth={1.5} className={isSelected ? 'text-[#8B5CF6]' : 'text-white/40'} />
+                        <div>
+                          <p className={`text-sm font-semibold font-sans ${isSelected ? 'text-[#F2F2F2]' : 'text-[#F2F2F2]/80'}`}>
+                            {mode.label}
+                          </p>
+                          <span className="text-[11px] text-[#A7A9AF]">{mode.desc}</span>
                         </div>
-                        <div className="flex items-center justify-between text-[10px] text-white/40">
-                          <span>{v.backend === 'elevenlabs' ? 'ElevenLabs' : v.backend === 'azure' ? 'Neural HD' : 'Local'}</span>
-                          {isSelected && <span className={STATUS_DOTS.hero} />}
-                        </div>
-                      </button>
+                        {isSelected && (
+                          <div className="w-6 h-6 rounded-full bg-[#6E8BFF] text-[#0B0D12] flex items-center justify-center shrink-0">
+                            <Check size={13} strokeWidth={2.5} />
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
-
-                {/* ── 9b. Lip-Sync Latency & Calibration ── */}
-                <div className="p-3 rounded-xl bg-[#0A0A0C] border border-white/[0.06] flex flex-col gap-2 mt-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Sliders size={12} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                      <span className="text-[11px] font-medium text-white">
-                        Lip-Sync Calibration
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-mono text-white/60 bg-white/[0.04] px-2 py-0.5 rounded-lg border border-white/[0.06]">
-                      {lipSyncDelayMs > 0 ? `+${lipSyncDelayMs}ms delay` : `${lipSyncDelayMs}ms`}
-                    </span>
-                  </div>
-
-                  <p className="text-[11px] text-white/50 leading-relaxed">
-                    Adjusts mouth-to-audio sync offset for speakers or Bluetooth headphones.
-                  </p>
-
-                  <div className="flex items-center gap-2 pt-0.5">
-                    <span className="text-[10px] text-white/40 font-mono whitespace-nowrap">-50ms</span>
-                    <input
-                      type="range"
-                      min="-50"
-                      max="350"
-                      step="10"
-                      value={lipSyncDelayMs}
-                      onChange={(e) => setLipSyncDelayMs(Number(e.target.value))}
-                      className={FORMS.range}
-                    />
-                    <span className="text-[10px] text-white/40 font-mono whitespace-nowrap">+350ms</span>
-                  </div>
-
-                  {/* Quick Presets */}
-                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setLipSyncDelayMs(120)}
-                      className={`py-1 px-1.5 rounded-lg text-[10px] font-mono border text-center transition-[transform,background-color,border-color,color] duration-150 ease-out active:scale-[0.98] ${
-                        lipSyncDelayMs === 120
-                          ? 'bg-[#8B5CF6]/20 border-[#8B5CF6]/50 text-white font-medium'
-                          : 'bg-[#141417] border-white/[0.04] text-white/60 hover:text-white'
-                      }`}
-                      title="Optimal sync for built-in laptop and monitor speakers"
-                    >
-                      Standard (120ms)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLipSyncDelayMs(200)}
-                      className={`py-1 px-1.5 rounded-lg text-[10px] font-mono border text-center transition-[transform,background-color,border-color,color] duration-150 ease-out active:scale-[0.98] ${
-                        lipSyncDelayMs === 200
-                          ? 'bg-[#8B5CF6]/20 border-[#8B5CF6]/50 text-white font-medium'
-                          : 'bg-[#141417] border-white/[0.04] text-white/60 hover:text-white'
-                      }`}
-                      title="Compensates for extra Bluetooth headphone latency"
-                    >
-                      Bluetooth (200ms)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLipSyncDelayMs(0)}
-                      className={`py-1 px-1.5 rounded-lg text-[10px] font-mono border text-center transition-[transform,background-color,border-color,color] duration-150 ease-out active:scale-[0.98] ${
-                        lipSyncDelayMs === 0
-                          ? 'bg-[#8B5CF6]/20 border-[#8B5CF6]/50 text-white font-medium'
-                          : 'bg-[#141417] border-white/[0.04] text-white/60 hover:text-white'
-                      }`}
-                      title="Direct 0ms offset"
-                    >
-                      Direct (0ms)
-                    </button>
-                  </div>
-                </div>
               </div>
 
-              {/* ── 10. Conversations & History Card ── */}
-              <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-4 flex flex-col gap-2.5">
-                <div className="flex items-center justify-between">
-                  <span className={TYPO.label}>
-                    Conversations
+              {/* Always-On Microphone Setting */}
+              <div className="bg-[#202126] rounded-2xl border border-[#2A2C33] p-4 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-[#F2F2F2] block font-sans">
+                    Always-On Microphone
                   </span>
-                  <span className={TYPO.mono}>Local History</span>
+                  <span className="text-[11px] text-[#A7A9AF]/70 block font-sans mt-0.5">
+                    Continuous hands-free conversation with intelligent feedback suppression
+                  </span>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsHistoryModalOpen(true)}
-                    className={`flex-1 h-9 px-3 ${BUTTONS.secondary} flex items-center justify-center gap-2 text-xs`}
-                  >
-                    <History size={13} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                    <span>Open History</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await clearAgentHistory();
-                      setHistoryClearedToast(true);
-                      setTimeout(() => setHistoryClearedToast(false), 2500);
-                    }}
-                    className={`h-9 px-3 ${BUTTONS.destructive} text-xs flex items-center justify-center gap-1.5`}
-                    title="Clear conversation history"
-                  >
-                    <Trash2 size={13} strokeWidth={1.5} />
-                    {historyClearedToast ? <span className="text-[10px] font-medium text-rose-400">Cleared</span> : null}
-                  </button>
-                </div>
-              </div>
-
-              {/* ── 11. Cloud & AI API Keys (Accordion) ── */}
-              <div className="bg-[#141417] rounded-xl border border-white/[0.06] p-4 flex flex-col gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setShowKeyConfig(!showKeyConfig)}
-                  className="w-full flex items-center justify-between text-left group"
+                  role="switch"
+                  aria-checked={isAlwaysOnMic}
+                  onClick={() => auraController.setAlwaysOnMic(!isAlwaysOnMic)}
+                  className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
+                    isAlwaysOnMic ? 'bg-[#6E8BFF]' : 'bg-[#181818] border border-[#2A2C33]'
+                  }`}
+                  title={isAlwaysOnMic ? 'Disable Always-On Mic' : 'Enable Always-On Mic'}
                 >
-                  <div className="flex items-center gap-2">
-                    <Key size={13} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                    <span className="text-xs font-medium text-white group-hover:text-white transition-colors">
-                      Cloud & AI API Keys
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-white/40 group-hover:text-white/70 transition-colors">
-                    <span className="text-[11px] font-mono">
-                      {keyStatuses.grok || keyStatuses.gemini || keyStatuses.elevenlabs ? 'Configured' : 'Optional'}
-                    </span>
-                    {showKeyConfig ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  </div>
+                  <div
+                    className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                      isAlwaysOnMic ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
                 </button>
-
-                {showKeyConfig && (
-                  <div className="mt-1 p-3 rounded-xl bg-[#0A0A0C] border border-white/[0.06] space-y-3">
-                    {/* Tab Selector - Unified Neutral + Violet Indicator */}
-                    <div className="flex items-center gap-1 p-1 bg-[#141417] rounded-xl border border-white/[0.04]">
-                      <button
-                        type="button"
-                        onClick={() => setActiveKeyTab('gemini')}
-                        className={`flex-1 py-1.5 text-[11px] font-medium rounded-lg transition-[background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 ${
-                          activeKeyTab === 'gemini'
-                            ? 'bg-white/[0.08] text-white shadow-sm'
-                            : 'text-white/50 hover:text-white'
-                        }`}
-                      >
-                        <Sparkles size={11} className={activeKeyTab === 'gemini' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-                        <span>Gemini</span>
-                        {keyStatuses.gemini && <span className={STATUS_DOTS.success} />}
-                      </button>
-                      
-                      <button
-                        type="button"
-                        onClick={() => setActiveKeyTab('grok')}
-                        className={`flex-1 py-1.5 text-[11px] font-medium rounded-lg transition-[background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 ${
-                          activeKeyTab === 'grok'
-                            ? 'bg-white/[0.08] text-white shadow-sm'
-                            : 'text-white/50 hover:text-white'
-                        }`}
-                      >
-                        <Sparkles size={11} className={activeKeyTab === 'grok' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-                        <span>Grok</span>
-                        {keyStatuses.grok && <span className={STATUS_DOTS.success} />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveKeyTab('elevenlabs')}
-                        className={`flex-1 py-1.5 text-[11px] font-medium rounded-lg transition-[background-color,color] duration-150 ease-out flex items-center justify-center gap-1.5 ${
-                          activeKeyTab === 'elevenlabs'
-                            ? 'bg-white/[0.08] text-white shadow-sm'
-                            : 'text-white/50 hover:text-white'
-                        }`}
-                      >
-                        <Volume2 size={11} className={activeKeyTab === 'elevenlabs' ? 'text-[#8B5CF6]' : 'text-white/40'} />
-                        <span>Voices</span>
-                        {keyStatuses.elevenlabs && <span className={STATUS_DOTS.success} />}
-                      </button>
-                    </div>
-
-                    {/* Grok Key Panel */}
-                    {activeKeyTab === 'grok' && (
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className={TYPO.caption}>xAI Grok API Key</span>
-                          <a
-                            href="https://console.x.ai/"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-[#8B5CF6] hover:text-[#A78BFA] hover:underline flex items-center gap-1 transition-colors"
-                          >
-                            <span>Get xAI Key</span>
-                            <ExternalLink size={10} />
-                          </a>
-                        </div>
-                        <input
-                          type="password"
-                          value={grokKey}
-                          onChange={(e) => setGrokKey(e.target.value)}
-                          placeholder="xai-..."
-                          className={`w-full ${FORMS.input}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (typeof window !== 'undefined') {
-                              localStorage.setItem('grok_api_key', grokKey);
-                              localStorage.setItem('xai_api_key', grokKey);
-                            }
-                            await saveAgentApiKey('grok', grokKey);
-                            setKeyStatuses(prev => ({ ...prev, grok: !!grokKey.trim() }));
-                            setKeyToastMessage('Grok Key Saved!');
-                            setTimeout(() => setKeyToastMessage(null), 2500);
-                          }}
-                          className={`w-full py-2 ${BUTTONS.primary} text-xs`}
-                        >
-                          {keyToastMessage || 'Save Grok Key'}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Gemini Key Panel */}
-                    {activeKeyTab === 'gemini' && (
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className={TYPO.caption}>Google Gemini Key (Free Tier)</span>
-                          <a
-                            href="https://aistudio.google.com/app/apikey"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-[#8B5CF6] hover:text-[#A78BFA] hover:underline flex items-center gap-1 transition-colors"
-                          >
-                            <span>Get Free Key</span>
-                            <ExternalLink size={10} />
-                          </a>
-                        </div>
-                        <input
-                          type="password"
-                          value={geminiKey}
-                          onChange={(e) => setGeminiKey(e.target.value)}
-                          placeholder="AIzaSy..."
-                          className={`w-full ${FORMS.input}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (typeof window !== 'undefined') localStorage.setItem('gemini_api_key', geminiKey);
-                            await saveAgentApiKey('gemini', geminiKey);
-                            setKeyStatuses(prev => ({ ...prev, gemini: !!geminiKey.trim() }));
-                            setKeyToastMessage('Gemini Key Saved!');
-                            setTimeout(() => setKeyToastMessage(null), 2500);
-                          }}
-                          className={`w-full py-2 ${BUTTONS.primary} text-xs`}
-                        >
-                          {keyToastMessage || 'Save Gemini Key'}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* ElevenLabs Key Panel */}
-                    {activeKeyTab === 'elevenlabs' && (
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className={TYPO.caption}>ElevenLabs Voice Key</span>
-                          <a
-                            href="https://elevenlabs.io"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-[#8B5CF6] hover:text-[#A78BFA] hover:underline flex items-center gap-1 transition-colors"
-                          >
-                            <span>elevenlabs.io</span>
-                            <ExternalLink size={10} />
-                          </a>
-                        </div>
-                        <input
-                          type="password"
-                          value={elevenLabsKey}
-                          onChange={(e) => setElevenLabsKey(e.target.value)}
-                          placeholder="Paste xi-api-key..."
-                          className={`w-full ${FORMS.input}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (typeof window !== 'undefined') localStorage.setItem('elevenlabs_api_key', elevenLabsKey);
-                            await saveElevenLabsKey(elevenLabsKey);
-                            setKeyStatuses(prev => ({ ...prev, elevenlabs: !!elevenLabsKey.trim() }));
-                            setKeyToastMessage('Voice Key Saved!');
-                            setTimeout(() => setKeyToastMessage(null), 2500);
-                          }}
-                          className={`w-full py-2 ${BUTTONS.primary} text-xs`}
-                        >
-                          {keyToastMessage || 'Save ElevenLabs Key'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
-            </>
+
+              {/* Camera View */}
+              <div className="space-y-3">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-[#A7A9AF] font-mono">
+                  Camera View
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setActiveCamera('wide')}
+                    className={`py-3 px-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                      activeCamera === 'wide'
+                        ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold border-transparent shadow-sm'
+                        : 'bg-[#181818] border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
+                    }`}
+                  >
+                    <Maximize2 size={15} strokeWidth={1.5} />
+                    <span>Wide View</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveCamera('closeup')}
+                    className={`py-3 px-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                      activeCamera === 'closeup'
+                        ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold border-transparent shadow-sm'
+                        : 'bg-[#181818] border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
+                    }`}
+                  >
+                    <Focus size={15} strokeWidth={1.5} />
+                    <span>Close-up</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status — clean, no model/DB info */}
+              <div className="bg-[#202126] rounded-2xl border border-[#2A2C33] p-4 space-y-0 text-xs">
+                <div className="flex items-center justify-between py-2.5 border-b border-[#2A2C33]">
+                  <span className="text-[#A7A9AF] font-sans">Assistant Status</span>
+                  <span className="text-emerald-400 font-medium">Online & Ready</span>
+                </div>
+                <div className="flex items-center justify-between py-2.5 border-b border-[#2A2C33]">
+                  <span className="text-[#A7A9AF] font-sans">Memory</span>
+                  <span className="text-[#F2F2F2] font-mono">Active</span>
+                </div>
+                <div className="flex items-center justify-between py-2.5">
+                  <span className="text-[#A7A9AF] font-sans">Voice Synthesis</span>
+                  <span className="text-[#F2F2F2] font-mono">Neural HD</span>
+                </div>
+              </div>
+
+            </div>
           )}
 
         </div>
-      </aside>
+      </div>
+    </aside>
     </>
   );
 }

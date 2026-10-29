@@ -10,7 +10,8 @@ export class PermissionManager {
   }
 
   requiresConfirmation(toolDef: ToolDefinition): boolean {
-    return toolDef.permission === 'DESTRUCTIVE';
+    // Require confirmation for destructive actions AND system/command executions
+    return toolDef.permission === 'DESTRUCTIVE' || toolDef.permission === 'SYSTEM';
   }
 
   createPendingConfirmation(

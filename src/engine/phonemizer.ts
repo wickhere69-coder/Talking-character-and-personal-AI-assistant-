@@ -198,17 +198,26 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
   if (!text || !text.trim()) return cues;
 
   const VOWEL_PHONEMES = ['AA','AE','AH','AO','AW','AY','EH','ER','EY','IH','IY','OW','OY','UH','UW'];
-  let currentTimeMs = 130; // Natural acoustic speech onset lead-in
+  // Exact zero-delay audio alignment - visual lip movement starts synchronously with acoustic audio wave
+  let currentTimeMs = 0;
+
+  const cleanText = text
+    .replace(/[*#`_~\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   const regex = /(\S+)/g;
   let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = regex.exec(cleanText)) !== null) {
     const rawWord = match[0];
     const charIndex = match.index;
     const cleanWord = rawWord.toLowerCase().replace(/[^a-z]/g, '');
 
-    let phonemes = cleanWord ? phonemizeWord(cleanWord) : [];
+    // Skip pure punctuation/symbol tokens so we do not generate false mouth movements
+    if (!cleanWord) continue;
+
+    let phonemes = phonemizeWord(cleanWord);
     if (!phonemes.length && cleanWord.length > 0) {
       phonemes = fallbackPhonemize(cleanWord);
     }
@@ -216,8 +225,8 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
       phonemes = ['AH'];
     }
 
-    // Dynamic word duration calibrated to natural 150-160 WPM neural speech cadence
-    const baseDuration = Math.max(240, Math.min(680, (rawWord.length * 52 + 150) / rate));
+    // Dynamic word duration calibrated to natural ~160 WPM neural Edge TTS speech rate
+    const baseDuration = Math.max(160, Math.min(520, (cleanWord.length * 42 + 130) / rate));
     const timings = estimatePhonemeTimings(phonemes, baseDuration);
 
     for (const t of timings) {
@@ -240,9 +249,9 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
 
     currentTimeMs += baseDuration;
 
-    // Detect punctuation pause
-    if (/[,\;]/.test(rawWord)) {
-      const pauseDur = 200 / rate;
+    // Detect punctuation pause for realistic natural cadence
+    if (/[,;]/.test(rawWord)) {
+      const pauseDur = 110 / rate;
       cues.push({
         timeMs: Math.round(currentTimeMs),
         durationMs: Math.round(pauseDur),
@@ -254,7 +263,7 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
       });
       currentTimeMs += pauseDur;
     } else if (/[\.\!\?]/.test(rawWord)) {
-      const pauseDur = 350 / rate;
+      const pauseDur = 200 / rate;
       cues.push({
         timeMs: Math.round(currentTimeMs),
         durationMs: Math.round(pauseDur),
@@ -265,20 +274,16 @@ export function buildSpeechVisemeTimeline(text: string, rate: number = 1.0): Spe
         jawOpen: 0
       });
       currentTimeMs += pauseDur;
-    } else {
-      // micro inter-word gap
-      const gap = 30 / rate;
-      currentTimeMs += gap;
     }
   }
 
-  // Final trailing silence cue
+  // Trailing silence cue at conclusion
   cues.push({
     timeMs: Math.round(currentTimeMs),
-    durationMs: 300,
+    durationMs: 200,
     viseme: 'viseme_sil',
     word: '',
-    charIndex: text.length,
+    charIndex: cleanText.length,
     intensity: 0,
     jawOpen: 0
   });

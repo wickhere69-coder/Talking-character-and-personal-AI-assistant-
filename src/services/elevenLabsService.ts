@@ -2,6 +2,18 @@ import type { VoiceOption, SynthesisResult, VisemeFrame } from '@/types';
 
 export const ELEVENLABS_VOICE_PACK: VoiceOption[] = [
   {
+    id: 'pFZP5JQG7iQjIQuC4Bku',
+    name: 'Lily (ElevenLabs)',
+    lang: 'en-GB',
+    backend: 'elevenlabs',
+    gender: 'female',
+    pitch: 0.95,
+    rate: 0.92,
+    previewUrl: '/voices/elevenlabs/lily.mp3',
+    description: 'Velvety, Warm British Narrator',
+    sampleText: 'Velvety British female voice delivers news, documentaries, and narrations with warmth and crystal clarity.'
+  },
+  {
     id: 'hpp4J3VqNfWAUOO0d1Us',
     name: 'Bella (ElevenLabs)',
     lang: 'en-US',
@@ -36,18 +48,6 @@ export const ELEVENLABS_VOICE_PACK: VoiceOption[] = [
     previewUrl: '/voices/elevenlabs/alice.mp3',
     description: 'Clear, Engaging British Educator',
     sampleText: 'Clear and engaging, friendly woman with a British accent suitable for e-learning and educational presentations.'
-  },
-  {
-    id: 'pFZP5JQG7iQjIQuC4Bku',
-    name: 'Lily (ElevenLabs)',
-    lang: 'en-GB',
-    backend: 'elevenlabs',
-    gender: 'female',
-    pitch: 0.95,
-    rate: 0.92,
-    previewUrl: '/voices/elevenlabs/lily.mp3',
-    description: 'Velvety, Warm British Narrator',
-    sampleText: 'Velvety British female voice delivers news, documentaries, and narrations with warmth and crystal clarity.'
   },
   {
     id: 'XrExE9yKIg1WjnnlVkGX',

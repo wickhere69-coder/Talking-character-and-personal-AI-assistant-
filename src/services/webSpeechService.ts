@@ -127,6 +127,7 @@ export function speakText(
   options: {
     rate?: number;
     pitch?: number;
+    lang?: string;
     onBoundary?: (charIndex: number, charLength?: number) => void;
     onEnd?: () => void;
     onStart?: () => void;
@@ -171,6 +172,22 @@ export function speakText(
     }
   }
 
+  // Locale-based voice matching (e.g. British female for en-GB / Lily)
+  if (!chosenVoice && options.lang) {
+    const targetLang = options.lang.toLowerCase().replace('_', '-');
+    chosenVoice = femaleVoices.find(v => {
+      const vLang = v.lang.toLowerCase().replace('_', '-');
+      return vLang === targetLang || vLang.startsWith(targetLang.split('-')[0] + '-' + (targetLang.split('-')[1] || ''));
+    }) || null;
+
+    if (!chosenVoice && targetLang.includes('gb')) {
+      chosenVoice = femaleVoices.find(v => {
+        const name = (v.name + ' ' + v.voiceURI).toLowerCase();
+        return (name.includes('british') || name.includes('uk') || name.includes('great britain') || name.includes('hazel') || name.includes('susan') || name.includes('george')) && !isMaleVoice(name);
+      }) || null;
+    }
+  }
+
   // Fallback strictly to female voice
   if (!chosenVoice) {
     chosenVoice = femaleVoices.length > 0 ? femaleVoices[0] : (allVoices.find(v => !isMaleVoice(v.name)) || allVoices[0] || null);
@@ -178,6 +195,10 @@ export function speakText(
 
   if (chosenVoice) {
     utterance.voice = chosenVoice;
+  }
+
+  if (options.lang) {
+    utterance.lang = options.lang;
   }
 
   utterance.rate = options.rate !== undefined ? options.rate : 1.0;
@@ -215,7 +236,13 @@ export function speakText(
   setTimeout(() => {
     if (sessionId !== activeUtteranceSession) return;
     try {
-      window.speechSynthesis.speak(utterance);
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        window.speechSynthesis.speak(utterance);
+        window.speechSynthesis.resume();
+      }
     } catch (err) {
       console.warn('Speech synthesis speak error:', err);
     }
@@ -259,6 +286,10 @@ export interface SpeechRecognizerController {
   start: () => void;
   stop: () => void;
   abort: () => void;
+  clear: () => void;
+  pause: () => void;
+  resume: () => void;
+  isPaused: () => boolean;
   isActive: () => boolean;
 }
 
@@ -271,6 +302,7 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
   if (!SpeechRec) return null;
 
   let active = false;
+  let paused = false;
   let recognition: any = null;
   let baseTranscript = '';
   let sessionFinalTranscript = '';
@@ -289,10 +321,11 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
     recognition = new SpeechRec();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en-US';
+    recognition.maxAlternatives = 1;
 
     recognition.onresult = (event: any) => {
-      if (!active) return;
+      if (!active || paused) return;
 
       let currentFinal = '';
       let currentInterim = '';
@@ -308,7 +341,7 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
 
       sessionFinalTranscript = currentFinal;
       const fullText = (baseTranscript + currentFinal + currentInterim).trim();
-      if (fullText && active) {
+      if (fullText && active && !paused) {
         const isLastFinal = event.results[event.results.length - 1]?.isFinal ?? false;
         handlers.onTranscript(fullText, isLastFinal);
       }
@@ -331,6 +364,9 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
         handlers.onEnd();
         return;
       }
+      if (paused) {
+        return;
+      }
 
       // If browser unexpectedly ends the session while user is still speaking (e.g. Chrome's internal 15s limit),
       // merge finalized text into baseTranscript and cleanly restart recognition without cutting off speech.
@@ -339,7 +375,7 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
 
       if (restartTimeout) clearTimeout(restartTimeout);
       restartTimeout = setTimeout(() => {
-        if (active) {
+        if (active && !paused) {
           try {
             recognition.start();
           } catch {
@@ -361,6 +397,7 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
   return {
     start: () => {
       active = true;
+      paused = false;
       baseTranscript = '';
       sessionFinalTranscript = '';
       try {
@@ -377,16 +414,47 @@ export function createSpeechRecognizer(handlers: SpeechRecognitionHandlers): Spe
     },
     stop: () => {
       active = false;
+      paused = false;
+      baseTranscript = '';
+      sessionFinalTranscript = '';
       if (restartTimeout) clearTimeout(restartTimeout);
       try { recognition.stop(); } catch {}
       handlers.onEnd();
     },
     abort: () => {
       active = false;
+      paused = false;
+      baseTranscript = '';
+      sessionFinalTranscript = '';
       if (restartTimeout) clearTimeout(restartTimeout);
       try { recognition.abort(); } catch {}
       handlers.onEnd();
     },
-    isActive: () => active
+    clear: () => {
+      baseTranscript = '';
+      sessionFinalTranscript = '';
+    },
+    pause: () => {
+      paused = true;
+      baseTranscript = '';
+      sessionFinalTranscript = '';
+    },
+    resume: () => {
+      paused = false;
+      baseTranscript = '';
+      sessionFinalTranscript = '';
+      if (active) {
+        try {
+          recognition.start();
+        } catch {
+          try {
+            initRecognition();
+            recognition.start();
+          } catch {}
+        }
+      }
+    },
+    isPaused: () => paused,
+    isActive: () => active && !paused
   };
 }

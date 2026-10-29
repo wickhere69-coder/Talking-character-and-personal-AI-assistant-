@@ -16,6 +16,7 @@ import { registerWebTools } from './tools/webTools';
 import { registerWeatherTools } from './tools/weatherTools';
 import { MemoryStore } from './memory/MemoryStore';
 import { ContextManager } from './memory/ContextManager';
+import { SessionManager } from './memory/SessionManager';
 import { PermissionManager } from './permissions/PermissionManager';
 
 function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], providerName?: string): ToolDefinition[] {
@@ -72,8 +73,6 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
 
   // Cloud models (Gemini, Grok) have native tool calling and should always have web_search available
   // so they can dynamically pull live web facts whenever answering current affairs or news.
-  // Treat an explicit 'auto' as cloud; leave undefined/unset to rely on keyword matching only —
-  // an unspecified provider may resolve to local_fallback, which does not need these schemas.
   const isCloudProvider = providerName === 'auto' || providerName === 'gemini' || providerName === 'grok';
   if (isCloudProvider) {
     matchedTools.add('web_search');
@@ -136,6 +135,10 @@ export class AgentCore {
     return this.memoryStore;
   }
 
+  getSessionManager(): SessionManager {
+    return this.contextManager.getSessionManager();
+  }
+
   getProviderManager(): ProviderManager {
     return this.providerManager;
   }
@@ -152,20 +155,22 @@ export class AgentCore {
     userMessage: string,
     config: AgentConfig = {},
     onChunk: (chunk: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sessionId?: string
   ): Promise<{ response: string; modelUsed: string }> {
     const isConversational = config.mode === 'conversational' || config.mode === 'chat';
     if (isConversational) {
       config.toolsEnabled = false;
       if (!config.maxTokens) {
-        config.maxTokens = 2048; // Ample token headroom for high-reasoning models (Gemini 3.8 Flash)
+        config.maxTokens = 2048; // Ample token headroom for high-reasoning models (Gemini 2.5 Flash)
       }
     }
 
     const messages = this.contextManager.buildPromptMessages(
       userMessage,
       this.conversationHistory,
-      config
+      config,
+      sessionId
     );
 
     let fullResponse = '';
@@ -174,9 +179,6 @@ export class AgentCore {
       onChunk(chunk);
     };
 
-    // Select relevant tools for the streaming path the same way the non-streaming
-    // path does. Passing [] always meant weather/web-search queries never ran tools
-    // through the streaming endpoint.
     const allDefs = this.toolRegistry.getAllDefinitions();
     const streamToolDefs = (config.toolsEnabled === false || isConversational)
       ? []
@@ -202,7 +204,11 @@ export class AgentCore {
       this.conversationHistory = this.conversationHistory.slice(-20);
     }
 
-    this.contextManager.saveTurn(userMessage, finalResponse);
+    this.contextManager.saveTurn(userMessage, finalResponse, sessionId);
+
+    if (sessionId) {
+      this.maybeTriggerSummarization(sessionId);
+    }
 
     return {
       response: finalResponse,
@@ -212,13 +218,30 @@ export class AgentCore {
 
   async handleUserMessage(
     userMessage: string,
-    config: AgentConfig = {}
+    config: AgentConfig = {},
+    sessionId?: string
   ): Promise<AgentChatResponse> {
     const isChatMode = config.mode === 'chat' || config.mode === 'conversational';
     const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 3);
     if (isChatMode) {
       config.toolsEnabled = false;
     }
+    // Guard against acoustic microphone self-echo looping into chat
+    const lastAssistant = [...this.conversationHistory].reverse().find(m => m.role === 'assistant');
+    if (lastAssistant && lastAssistant.content.trim() && userMessage.trim().length > 12) {
+      const cleanUser = userMessage.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const cleanAssistant = lastAssistant.content.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (cleanUser === cleanAssistant || (cleanAssistant.length > 25 && cleanAssistant.includes(cleanUser) && cleanUser.length > 20)) {
+        return {
+          response: "I'm right here listening whenever you're ready.",
+          status: 'speaking',
+          toolsExecuted: [],
+          modelUsed: 'echo_guard',
+          memoriesRecalled: []
+        };
+      }
+    }
+
     const toolsExecuted: AgentChatResponse['toolsExecuted'] = [];
     const memoriesRecalled = this.memoryStore.recall(userMessage).map((m) => `${m.key}: ${m.value}`);
 
@@ -226,7 +249,8 @@ export class AgentCore {
     const messages = this.contextManager.buildPromptMessages(
       userMessage,
       this.conversationHistory,
-      config
+      config,
+      sessionId
     );
 
     let iteration = 0;
@@ -237,14 +261,11 @@ export class AgentCore {
     while (iteration < maxIterations) {
       iteration++;
 
-      // Dynamically select only the tools relevant to the prompt (drops 2,500+ schema tokens down to 0-150 tokens)
       const allDefs = this.toolRegistry.getAllDefinitions();
       let toolDefs = (config.toolsEnabled === false || isChatMode)
         ? []
         : selectRelevantTools(userMessage, allDefs, config.modelProvider);
 
-      // Once tools (e.g. web_search, weather, files) have gathered data,
-      // clear tools on subsequent iterations so the LLM cleanly synthesizes the final spoken response
       if (iteration > 1 && toolsExecuted.length > 0) {
         toolDefs = [];
       }
@@ -256,12 +277,10 @@ export class AgentCore {
       );
       lastProviderUsed = providerUsed;
 
-      // Check if provider requested tool calls
       if (providerRes.toolCalls && providerRes.toolCalls.length > 0) {
         for (const tc of providerRes.toolCalls) {
           const toolDef = this.toolRegistry.getTool(tc.name)?.definition;
 
-          // Check if action is destructive and requires user confirmation
           if (toolDef && this.permissionManager.requiresConfirmation(toolDef)) {
             pendingConfirmation = this.permissionManager.createPendingConfirmation(tc.name, tc.arguments);
             return {
@@ -273,7 +292,6 @@ export class AgentCore {
             };
           }
 
-          // Execute tool safely
           const result = await this.toolRegistry.execute(tc.name, tc.arguments);
           toolsExecuted.push({
             name: tc.name,
@@ -281,7 +299,6 @@ export class AgentCore {
             result
           });
 
-          // Append tool execution message to the message chain
           messages.push({
             role: 'assistant',
             content: providerRes.content || '',
@@ -296,20 +313,16 @@ export class AgentCore {
           });
         }
 
-        // Fast path: Only local_fallback or explicit chat mode returns tool message directly
         if (providerUsed === 'local_fallback' || isChatMode) {
           finalContent = synthesizeToolResults(toolsExecuted);
           break;
         }
 
-        // For neural models (Groq, Gemini, Ollama): allow next iteration so the LLM reads
-        // the tool execution results and synthesizes a natural, concise, up-to-date answer!
         if (iteration >= maxIterations) {
           finalContent = synthesizeToolResults(toolsExecuted);
           break;
         }
       } else {
-        // No tool calls needed; final spoken response generated
         finalContent = providerRes.content;
         break;
       }
@@ -326,7 +339,11 @@ export class AgentCore {
       this.conversationHistory = this.conversationHistory.slice(-20);
     }
 
-    this.contextManager.saveTurn(userMessage, finalContent);
+    this.contextManager.saveTurn(userMessage, finalContent, sessionId);
+
+    if (sessionId) {
+      this.maybeTriggerSummarization(sessionId);
+    }
 
     return {
       response: finalContent,
@@ -359,5 +376,58 @@ export class AgentCore {
   clearContext(): void {
     this.conversationHistory = [];
     this.memoryStore.clearHistory();
+  }
+
+  private maybeTriggerSummarization(sessionId: string): void {
+    const sessionManager = this.contextManager.getSessionManager();
+    const data = sessionManager.getSession(sessionId);
+    if (!data) return;
+
+    const count = data.messages.length;
+    // Trigger if session has 6+ messages and has no summary or message count is divisible by 4
+    if (count >= 6 && (!data.session.summary || count % 4 === 0)) {
+      this.triggerBackgroundSummarization(sessionId).catch(err => {
+        console.warn('[AgentCore] Summarization background catch:', err?.message || err);
+      });
+    }
+  }
+
+  public async triggerBackgroundSummarization(sessionId: string): Promise<void> {
+    const sessionManager = this.contextManager.getSessionManager();
+    const sessionData = sessionManager.getSession(sessionId);
+    if (!sessionData || sessionData.messages.length < 4) return;
+
+    try {
+      const turns = sessionData.messages.slice(-12).map(m => `${m.role === 'user' ? 'User' : 'Aura'}: ${m.content}`).join('\n');
+      const prompt: AgentMessage[] = [
+        {
+          role: 'system',
+          content: 'You are an analytical AI conversation summarizer. Given a dialogue, output:\nTOPIC: <2-4 word primary topic>\nSUMMARY: <2-3 sentence rolling summary of discussed topics and agreements>\nFACTS:\n- <important established requirement or decision>\n- <important established preference or goal>\nOnly output this format without preamble.'
+        },
+        {
+          role: 'user',
+          content: `Transcript turns:\n${turns}\n\nProduce the topic, summary, and facts:`
+        }
+      ];
+
+      const res = await this.providerManager.generateResponse(prompt, [], { maxTokens: 400 });
+      const text = res.response.content || '';
+
+      const topicMatch = text.match(/TOPIC:\s*(.+)/i);
+      const summaryMatch = text.match(/SUMMARY:\s*([\s\S]+?)(?=(?:FACTS:|$))/i);
+      const factsMatch = text.match(/FACTS:\s*([\s\S]+)/i);
+
+      const topic = topicMatch ? topicMatch[1].trim() : undefined;
+      const summary = summaryMatch ? summaryMatch[1].trim() : undefined;
+      const facts = factsMatch
+        ? factsMatch[1].split(/\n/).map(l => l.replace(/^[-*•]\s*/, '').trim()).filter(Boolean)
+        : [];
+
+      if (summary) {
+        sessionManager.updateRollingSummary(sessionId, summary, facts, topic);
+      }
+    } catch (err) {
+      console.warn('[AgentCore] Notice in background summarization:', err);
+    }
   }
 }

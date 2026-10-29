@@ -105,7 +105,11 @@ export function registerOsTools(registry: ToolRegistry): void {
       }
 
       return new Promise((resolve) => {
-        exec(`start "" "${url}"`, (err) => {
+        // Strict shell metacharacter and URL validation to prevent command injection
+      if (/["'`$;&|<>^%\\\0\r\n]/.test(url)) {
+        return resolve({ success: false, error: 'Command injection blocked: URL contains prohibited shell metacharacters.', message: 'Invalid URL.' });
+      }
+      exec(`start "" "${url.replace(/"/g, '')}"`, (err) => {
           if (err) {
             resolve({ success: false, error: err.message, message: 'Failed to launch URL in browser.' });
           } else {

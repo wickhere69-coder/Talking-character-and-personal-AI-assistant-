@@ -13,6 +13,17 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    fs: {
+      deny: [
+        '**/.env',
+        '**/.env.*',
+        '**/server/**',
+        '**/data/**',
+        '**/.git/**',
+        '**/*.key',
+        '**/*.pem',
+      ],
+    },
     watch: {
       ignored: [
         '**/data/**',

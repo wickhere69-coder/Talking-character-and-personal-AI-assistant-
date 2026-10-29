@@ -166,3 +166,4 @@ export default function Character({ url }: { url?: string }) {
 }
 
 useGLTF.preload(AVATAR_URL);
+

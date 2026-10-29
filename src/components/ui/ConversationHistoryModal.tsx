@@ -35,13 +35,13 @@ export default function ConversationHistoryModal() {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-[#0F0F12]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A2C33] bg-[#181818]">
           <div className="flex items-center gap-2.5">
-            <MessageSquare size={16} strokeWidth={1.5} className="text-[#8B5CF6]" />
+            <MessageSquare size={16} strokeWidth={1.5} className="text-[#6E8BFF]" />
             <h2 className={TYPO.title}>
               Conversation Memory & History
             </h2>
-            <span className={`px-2 py-0.5 rounded-lg ${TYPO.mono} bg-white/[0.04] border border-white/[0.06]`}>
+            <span className="px-2 py-0.5 rounded-full font-mono text-[11px] bg-[#202126] text-[#A7A9AF] border border-[#2A2C33]">
               {history.length} {history.length === 1 ? 'turn' : 'turns'}
             </span>
           </div>
@@ -70,18 +70,18 @@ export default function ConversationHistoryModal() {
         </div>
 
         {/* Message List */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[#181818]">
           {loading ? (
-            <div className="py-16 text-center text-white/40 text-xs">
+            <div className="py-16 text-center text-[#A7A9AF]/60 text-xs font-sans">
               Loading conversation history...
             </div>
           ) : history.length === 0 ? (
             <div className="py-16 text-center space-y-2 flex flex-col items-center justify-center">
-              <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mb-1">
-                <MessageSquare size={18} strokeWidth={1.5} className="text-white/40" />
+              <div className="w-10 h-10 rounded-full bg-[#202126] border border-[#2A2C33] flex items-center justify-center mb-1">
+                <MessageSquare size={18} strokeWidth={1.5} className="text-[#A7A9AF]" />
               </div>
-              <p className="text-xs text-white/80 font-medium">No conversation history yet.</p>
-              <p className="text-[11px] text-white/40 max-w-xs">
+              <p className="text-xs text-[#F2F2F2]/90 font-medium font-sans">No conversation history yet.</p>
+              <p className="text-[11px] text-[#A7A9AF]/70 max-w-xs font-sans">
                 Ask the AI Assistant a question or speak into the microphone to start a session.
               </p>
             </div>
@@ -91,7 +91,7 @@ export default function ConversationHistoryModal() {
                 key={idx}
                 className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
-                <span className={`${TYPO.label} px-1 flex items-center gap-1.5`}>
+                <span className={`${TYPO.label} px-1 flex items-center gap-1.5 text-[#A7A9AF]`}>
                   {msg.role === 'user' ? (
                     <>
                       <User size={10} strokeWidth={1.5} />
@@ -99,16 +99,16 @@ export default function ConversationHistoryModal() {
                     </>
                   ) : (
                     <>
-                      <Bot size={10} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                      <span>Studio AI Assistant</span>
+                      <Bot size={10} strokeWidth={1.5} className="text-[#6E8BFF]" />
+                      <span>Aura AI Assistant</span>
                     </>
                   )}
                 </span>
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap ${
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap font-sans ${
                     msg.role === 'user'
-                      ? 'bg-gradient-to-br from-[#8B5CF6] to-[#7C3AED] text-white rounded-br-sm shadow-[0_2px_12px_rgba(139,92,246,0.25)]'
-                      : 'bg-[#141417] border border-white/[0.06] text-white/90 rounded-bl-sm'
+                      ? 'bg-[#202126] border border-[#2A2C33] text-[#F2F2F2] font-medium rounded-br-sm shadow-sm'
+                      : 'bg-[#202126] border border-[#2A2C33] border-l-2 border-l-[#6E8BFF] text-[#F2F2F2]/90 rounded-bl-sm'
                   }`}
                 >
                   {msg.content}
@@ -119,7 +119,7 @@ export default function ConversationHistoryModal() {
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3 border-t border-white/[0.06] bg-[#0F0F12] flex items-center justify-between text-[11px] text-white/40">
+        <div className="px-6 py-3 border-t border-[#2A2C33] bg-[#181818] flex items-center justify-between text-[11px] text-[#A7A9AF]">
           <span>Stored locally in private session memory</span>
           <button
             type="button"

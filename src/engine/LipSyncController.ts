@@ -17,7 +17,7 @@ export class LipSyncController {
   private lastAudioCurrentTime: number = 0;
   private lastAudioPerfTime: number = 0;
   private isAudioTracking: boolean = false;
-  private syncDelayMs: number = 120;
+  private syncDelayMs: number = 0;
 
   constructor(meshes: THREE.SkinnedMesh[]) {
     this.meshes = meshes;
@@ -29,7 +29,7 @@ export class LipSyncController {
   }
 
   setSyncDelayMs(delay: number): void {
-    this.syncDelayMs = typeof delay === 'number' && !isNaN(delay) ? delay : 120;
+    this.syncDelayMs = typeof delay === 'number' && !isNaN(delay) ? delay : 0;
   }
 
   getSyncDelayMs(): number {
@@ -48,11 +48,17 @@ export class LipSyncController {
     this.speechClockMs = 0;
     this.isSettling = false;
     this.speechStarted = true;
+    this.isAudioTracking = false;
+    this.lastAudioCurrentTime = 0;
+    this.lastAudioPerfTime = 0;
   }
 
   signalSpeechActuallyStarted(): void {
     this.speechStarted = true;
     this.speechClockMs = 0;
+    this.isAudioTracking = false;
+    this.lastAudioCurrentTime = 0;
+    this.lastAudioPerfTime = 0;
   }
 
   syncCharIndex(charIndex: number): void {
@@ -68,6 +74,9 @@ export class LipSyncController {
     this.visemeQueue = [];
     this.speechStarted = false;
     this.isAudioTracking = false;
+    this.lastAudioCurrentTime = 0;
+    this.lastAudioPerfTime = 0;
+    this.speechClockMs = 0;
     this.startSettle();
   }
 
@@ -140,6 +149,8 @@ export class LipSyncController {
       this.startSettle();
       this.speechStarted = false;
       this.isAudioTracking = false;
+      this.lastAudioCurrentTime = 0;
+      this.lastAudioPerfTime = 0;
     }
     this.wasSpeaking = isSpeaking;
 
@@ -165,11 +176,14 @@ export class LipSyncController {
     // Speaking is active
     this.speechStarted = true;
 
-    // 1. Determine raw playback time from interpolated audio clock or speech fallback
+    // 1. Determine raw playback time from interpolated continuous audio clock
     const interpolatedTime = this.getInterpolatedAudioTimeMs();
     let rawTimeMs: number;
 
-    if (interpolatedTime > 0) {
+    if (this.isAudioTracking) {
+      rawTimeMs = interpolatedTime;
+      this.speechClockMs = rawTimeMs;
+    } else if (interpolatedTime > 0) {
       rawTimeMs = interpolatedTime;
       this.speechClockMs = rawTimeMs;
     } else if (passedAudioTimeMs > 0) {
@@ -181,10 +195,23 @@ export class LipSyncController {
       rawTimeMs = this.speechClockMs;
     }
 
-    // 2. Apply calibrated delay offset:
-    // When the lips are too early and sound is too late, delaying the mouth position
-    // (subtracting syncDelayMs) matches the visual mouth shape to the physical sound wave!
-    const timeMs = Math.max(0, rawTimeMs - this.syncDelayMs);
+    // 2. High-precision sync timing:
+    // Subtract calibrated delay offset (0ms by default for zero latency)
+    let timeMs = Math.max(0, rawTimeMs - this.syncDelayMs);
+
+    // Dynamic duration scaling: when HTML5 audio element duration is known,
+    // proportionally scale cue timing so mouth movement matches the audio duration with 100% precision!
+    if (this.visemeQueue.length === 0 && this.speechCues.length > 0 && this.audioElement) {
+      const audioDuration = this.audioElement.duration;
+      if (isFinite(audioDuration) && audioDuration > 0.2) {
+        const audioDurationMs = audioDuration * 1000;
+        const lastCue = this.speechCues[this.speechCues.length - 1];
+        const estimatedTotalMs = lastCue.timeMs + lastCue.durationMs;
+        if (estimatedTotalMs > 100) {
+          timeMs = (timeMs / audioDurationMs) * estimatedTotalMs;
+        }
+      }
+    }
 
     let targetWeights: Record<string, number> = {};
 
@@ -192,7 +219,7 @@ export class LipSyncController {
       // High-precision ElevenLabs timestamps
       targetWeights = this.interpolateVisemes(timeMs);
     } else if (this.speechCues.length > 0) {
-      // Natural English phoneme-to-viseme timeline
+      // Natural English phoneme-to-viseme timeline synchronized to audio
       targetWeights = this.sampleSpeechTimeline(timeMs);
     } else {
       // Natural cadence speech articulation fallback - gentle natural human amplitude
@@ -218,6 +245,19 @@ export class LipSyncController {
 
   private sampleSpeechTimeline(timeMs: number): Record<string, number> {
     if (!this.speechCues.length) return {};
+
+    const firstCue = this.speechCues[0];
+    if (timeMs < firstCue.timeMs) {
+      if (firstCue.timeMs <= 0) return {};
+      // Smoothly ease in from neutral to the first cue
+      const factor = Math.max(0, Math.min(1, timeMs / firstCue.timeMs));
+      const weights: Record<string, number> = {};
+      const directOculus = firstCue.viseme;
+      if (directOculus && directOculus !== 'viseme_sil') {
+        weights[directOculus] = firstCue.intensity * factor * 0.55;
+      }
+      return weights;
+    }
 
     // Find the active cue
     let activeIdx = 0;

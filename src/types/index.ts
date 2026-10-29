@@ -6,6 +6,15 @@ export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused';
 
 export type CameraPreset = 'wide' | 'closeup';
 
+export type AuraConversationState =
+  | 'sleeping'
+  | 'waking'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'idle_active'
+  | 'stopping';
+
 export interface VoiceOption {
   id: string;
   name: string;
@@ -134,6 +143,8 @@ export interface AppState {
   // Speech Recognition / Voice Repeat
   isListening: boolean;
   setIsListening: (listening: boolean) => void;
+  isAlwaysOnMic: boolean;
+  setIsAlwaysOnMic: (alwaysOn: boolean) => void;
   autoRepeat: boolean;
   setAutoRepeat: (repeat: boolean) => void;
 
@@ -144,8 +155,8 @@ export interface AppState {
   setAgentModeType: (mode: 'agent' | 'chat' | 'repeat' | 'conversational') => void;
   isConversationalActive: boolean;
   setIsConversationalActive: (active: boolean) => void;
-  agentSpeed: 'instant' | 'grok' | 'gemini';
-  setAgentSpeed: (speed: 'instant' | 'grok' | 'gemini') => void;
+  agentSpeed: 'instant' | 'grok' | 'gemini' | 'langgraph';
+  setAgentSpeed: (speed: 'instant' | 'grok' | 'gemini' | 'langgraph') => void;
   agentStatus: 'idle' | 'listening' | 'thinking' | 'planning' | 'executing_tool' | 'speaking' | 'completed' | 'error' | 'awaiting_confirmation';
   setAgentStatus: (status: 'idle' | 'listening' | 'thinking' | 'planning' | 'executing_tool' | 'speaking' | 'completed' | 'error' | 'awaiting_confirmation') => void;
   currentAgentAction: string | null;
@@ -167,9 +178,28 @@ export interface AppState {
   setLastFullResponse: (text: string) => void;
   isFullResponseModalOpen: boolean;
   setIsFullResponseModalOpen: (open: boolean) => void;
+  // Navigation & S1 UI State
+  activeNavTab: 'home' | 'chat' | 'voice' | 'settings';
+  setActiveNavTab: (tab: 'home' | 'chat' | 'voice' | 'settings') => void;
+  isControlPanelCollapsed: boolean;
+  setIsControlPanelCollapsed: (collapsed: boolean) => void;
+
+  // Theme
+  isDarkTheme: boolean;
+  setIsDarkTheme: (dark: boolean) => void;
+
+  // Aura Conversation State
+  auraState: AuraConversationState;
+  setAuraState: (state: AuraConversationState) => void;
 
   // Error
   error: string | null;
   setError: (e: string | null) => void;
+
+  // Human Behavior / Emotion State
+  currentEmotion: { primary: string; intensity: number; secondary: string | null };
+  setCurrentEmotion: (emotion: { primary: string; intensity: number; secondary: string | null }) => void;
+  currentSentence: string;
+  setCurrentSentence: (sentence: string) => void;
 }
 

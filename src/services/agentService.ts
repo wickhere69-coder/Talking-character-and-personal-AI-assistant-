@@ -18,12 +18,13 @@ export interface AgentChatResponse {
 
 export async function sendAgentMessage(
   message: string,
-  config?: { mode?: 'agent' | 'chat' | 'repeat' | 'conversational'; modelProvider?: string; maxTokens?: number }
+  config?: { mode?: 'agent' | 'chat' | 'repeat' | 'conversational'; modelProvider?: string; maxTokens?: number },
+  sessionId?: string
 ): Promise<AgentChatResponse> {
   const res = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, config })
+    body: JSON.stringify({ message, config, sessionId })
   });
 
   if (!res.ok) {
@@ -47,7 +48,8 @@ export async function streamAgentConversation(
     onComplete?: (fullResponse: string, modelUsed: string) => void;
     onError?: (error: Error) => void;
   },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  sessionId?: string
 ): Promise<void> {
   try {
     const res = await fetch('/api/agent/stream', {
@@ -55,6 +57,7 @@ export async function streamAgentConversation(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message,
+        sessionId,
         config: {
           ...config,
           mode: config.mode || 'conversational'

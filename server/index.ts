@@ -2,31 +2,126 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
-import * as SpeechSDK from 'microsoft-cognitiveservices-speech-sdk';
-import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { EdgeTTS } from 'node-edge-tts';
 import { createAgentRouter } from './agent/routes';
+import { createAdminRouter } from './routes/adminRoutes';
+import { persistEnvVar } from './utils/envUtils';
+import { AgentCore } from './agent/AgentCore';
+import { sanitizeString } from './utils/sanitizer';
+import { adminAuthMiddleware } from './routes/adminRoutes';
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-
 const PORT = process.env.PORT || 3001;
-const AZURE_KEY = process.env.AZURE_SPEECH_KEY || '';
-const AZURE_REGION = process.env.AZURE_SPEECH_REGION || 'eastus';
 let ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
 
-app.get('/api/status', (req, res) => {
-  res.json({
-    azure: true,
-    elevenlabs: !!ELEVENLABS_KEY
-  });
-});
+// ── 1. Security Headers (Helmet) ─────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: [
+        "'self'",
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "https://generativelanguage.googleapis.com",
+        "https://api.elevenlabs.io",
+        "https://*.supabase.co"
+      ],
+      mediaSrc: ["'self'", "blob:", "data:"],
+      workerSrc: ["'self'", "blob:"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  hidePoweredBy: true,
+  noSniff: true,
+  xssFilter: true,
+  frameguard: { action: 'sameorigin' }
+}));
 
-// Process-level safeguards to keep the Express server permanently resilient against network drops
+// ── 2. CORS Hardening ────────────────────────────────────────────────────────
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000')
+  .split(',')
+  .map(o => o.trim());
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. server-to-server, curl)
+    if (!origin) return callback(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:')
+    ) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS violation: Origin "${origin}" is not authorized.`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-secret', 'x-admin-token'],
+  credentials: true,
+  maxAge: 86400
+}));
+
+// ── 3. Request Size Sanitization & Protection ────────────────────────────────
+app.use(express.json({ limit: '512kb' }));
+
+// ── 4. Rate Limiting ─────────────────────────────────────────────────────────
+// Global limiter: 180 requests per minute
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 180,
+  message: { error: 'Too many requests from this IP address, please try again in a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(globalLimiter);
+
+// AI Chat rate limiter: 40 requests per minute (prevents quota exhaustion & billing spikes)
+const aiChatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,
+  message: { error: 'AI generation rate limit exceeded. Please wait a moment before sending another message.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/agent/chat', aiChatLimiter);
+app.use('/api/agent/stream', aiChatLimiter);
+
+// Audio synthesis rate limiter: 60 requests per minute
+const ttsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'Audio synthesis rate limit reached. Please wait a moment.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/synthesize', ttsLimiter);
+app.use('/api/tts-stream', ttsLimiter);
+app.use('/api/elevenlabs', ttsLimiter);
+
+// Admin Auth brute-force limiter: 20 attempts per 5 minutes (ignoring successful logins)
+const adminLoginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many failed admin authentication attempts. Access temporarily locked for 5 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/admin/login', adminLoginLimiter);
+
+// ── 5. Process-level Safeguards ──────────────────────────────────────────────
 process.on('uncaughtException', (err: any) => {
   console.warn('[SERVER UNCAUGHT EXCEPTION SAFEGUARD]:', err?.message || err);
 });
@@ -34,68 +129,83 @@ process.on('unhandledRejection', (reason: any) => {
   console.warn('[SERVER UNHANDLED REJECTION SAFEGUARD]:', reason);
 });
 
+// ── Status Route ─────────────────────────────────────────────────────────────
+app.get('/api/status', (req, res) => {
+  res.json({
+    azure: true,
+    elevenlabs: !!ELEVENLABS_KEY
+  });
+});
+
 const ttsAudioCache = new Map<string, Buffer>();
 const MAX_CACHE_ENTRIES = 120;
-const ttsClients = new Map<string, MsEdgeTTS>();
 
-async function getEdgeTtsClient(voice: string): Promise<MsEdgeTTS> {
-  let client = ttsClients.get(voice);
-  if (!client) {
-    client = new MsEdgeTTS();
-    await client.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-    ttsClients.set(voice, client);
-  }
-  return client;
-}
+// Voice map strictly mapping ElevenLabs voice IDs to Microsoft Neural voices
+const VOICE_MAP: Record<string, string> = {
+  'pFZP5JQG7iQjIQuC4Bku': 'en-GB-SoniaNeural',   // Lily (Velvety, Warm British Narrator)
+  'Xb7hH8MSUJpSbSDYk0k2': 'en-GB-LibbyNeural',   // Alice (Clear, Engaging British Educator)
+  'hpp4J3VqNfWAUOO0d1Us': 'en-US-JennyNeural',   // Bella (Warm, Professional US English)
+  'cgSgspJ2msm6clMCkdW9': 'en-US-AriaNeural',    // Jessica (Playful, Bright, Warm US English)
+  'XrExE9yKIg1WjnnlVkGX': 'en-US-SaraNeural',    // Matilda (Warm, Professional)
+  'EXAVITQu4vr4xnSDxMaL': 'en-US-MichelleNeural' // Sarah
+};
 
-// Pre-warm neural studio voices for instant zero-latency "Hey there."
-setTimeout(async () => {
+async function synthesizeNeuralAudio(text: string, voiceId?: string): Promise<Buffer | null> {
+  const clean = sanitizeString(text, 1000)
+    .replace(/[*#`_~\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!clean) return null;
+
+  const voiceName = (voiceId && VOICE_MAP[voiceId]) || 'en-GB-SoniaNeural';
+
+  // 1. Primary: Microsoft Edge Neural TTS
   try {
-    const prewarmVoices = [
-      'en-US-JennyNeural',
-      'en-US-AriaNeural',
-      'en-US-AvaNeural',
-      'en-US-EmmaNeural',
-      'en-US-MichelleNeural',
-      'en-US-AnaNeural',
-      'en-GB-SoniaNeural',
-      'en-AU-NatashaNeural'
-    ];
-    for (const v of prewarmVoices) {
-      try {
-        const client = await getEdgeTtsClient(v);
-        const res = client.toStream('Hey there.');
-        const chunks: Buffer[] = [];
-        res.audioStream.on('data', c => chunks.push(c));
-        res.audioStream.on('end', () => {
-          const buf = Buffer.concat(chunks);
-          ttsAudioCache.set(`${v}:Hey there.`, buf);
-          ttsAudioCache.set(`${v}:Hey there`, buf);
-          console.log(`[TTS PRE-WARMED] ${v} ready with instant "Hey there."`);
-        });
-        res.audioStream.on('error', () => {
-          ttsClients.delete(v);
-        });
-      } catch (err) {
-        ttsClients.delete(v);
-        console.warn(`[TTS PRE-WARMED] Notice on ${v}:`, err);
+    const tts = new EdgeTTS({
+      voice: voiceName,
+      outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
+    });
+    const chunks: Buffer[] = [];
+    for await (const chunk of tts.streamAudio(clean)) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
       }
     }
-  } catch (e) {
-    console.warn('Notice during TTS pre-warm:', e);
+    if (chunks.length > 0) {
+      return Buffer.concat(chunks);
+    }
+  } catch (err: any) {
+    console.warn(`[EDGE TTS] Synthesis notice:`, err?.message || err);
   }
-}, 1000);
+
+  // 2. Secondary Fallback: Google TTS API
+  try {
+    const googleTTS = await import('google-tts-api');
+    const results = await (googleTTS as any).getAllAudioBase64(clean, {
+      lang: 'en',
+      slow: false,
+      timeout: 10000
+    });
+    const bufs = results.map((r: any) => Buffer.from(r.base64, 'base64'));
+    if (bufs.length > 0) {
+      return Buffer.concat(bufs);
+    }
+  } catch (err: any) {
+    console.warn('[GOOGLE TTS FALLBACK] error:', err?.message || err);
+  }
+
+  return null;
+}
 
 app.get('/api/tts-stream', async (req, res) => {
-  const text = (req.query.text as string || '').trim();
-  const voice = (req.query.voice as string) || 'en-US-JennyNeural';
-  const rate = (req.query.rate as string) || '+3%';
-  const pitch = (req.query.pitch as string) || '+1Hz';
-  if (!text) {
+  const rawText = sanitizeString(req.query.text as string || '', 1000);
+  const rawVoice = sanitizeString(req.query.voice as string || '', 64) || 'pFZP5JQG7iQjIQuC4Bku';
+  if (!rawText) {
     return res.status(400).send('Text is required');
   }
 
-  const cacheKey = `${voice}:${rate}:${pitch}:${text}`;
+  const cacheKey = `${rawVoice}:${rawText}`;
   const cached = ttsAudioCache.get(cacheKey);
   if (cached) {
     res.setHeader('Content-Type', 'audio/mpeg');
@@ -104,92 +214,98 @@ app.get('/api/tts-stream', async (req, res) => {
     return res.end(cached);
   }
 
+  const clean = rawText
+    .replace(/[*#`_~\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!clean) {
+    return res.status(400).send('Empty text after cleaning');
+  }
+
+  const voiceName = (rawVoice && VOICE_MAP[rawVoice]) || 'en-GB-SoniaNeural';
+
   try {
-    const tts = await getEdgeTtsClient(voice);
-    const result = tts.toStream(text, { rate, pitch });
+    const tts = new EdgeTTS({
+      voice: voiceName,
+      outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
+    });
 
     res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('Cache-Control', 'public, max-age=86400');
 
     const chunks: Buffer[] = [];
-    result.audioStream.on('data', (chunk: Buffer) => {
-      chunks.push(chunk);
-      if (!res.writableEnded) {
-        res.write(chunk);
-      }
+    let clientDisconnected = false;
+    req.on('close', () => {
+      clientDisconnected = true;
     });
 
-    result.audioStream.on('end', () => {
-      const fullBuffer = Buffer.concat(chunks);
+    for await (const chunk of tts.streamAudio(clean)) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+        if (!clientDisconnected && !res.writableEnded) {
+          res.write(chunk);
+        }
+      }
+    }
+
+    if (!res.writableEnded) {
+      res.end();
+    }
+
+    if (chunks.length > 0) {
+      const audioBuf = Buffer.concat(chunks);
       if (ttsAudioCache.size >= MAX_CACHE_ENTRIES) {
         const firstKey = ttsAudioCache.keys().next().value;
         if (firstKey) ttsAudioCache.delete(firstKey);
       }
-      ttsAudioCache.set(cacheKey, fullBuffer);
-      if (!res.writableEnded) {
-        res.end();
-      }
-    });
-
-    result.audioStream.on('error', (err: any) => {
-      console.warn('TTS stream error handled:', err?.message || err);
-      ttsClients.delete(voice);
-      if (!res.headersSent) {
-        res.status(500).json({ error: err?.message || 'Streaming failed' });
-      } else if (!res.writableEnded) {
-        res.end();
-      }
-    });
+      ttsAudioCache.set(cacheKey, audioBuf);
+    }
   } catch (error: any) {
-    console.warn('TTS stream init notice handled:', error?.message || error);
-    ttsClients.delete(voice);
+    console.warn('Edge TTS streaming notice, attempting fallback:', error.message);
     if (!res.headersSent) {
-      res.status(500).json({ error: error?.message || 'Streaming failed' });
+      try {
+        const audioBuf = await synthesizeNeuralAudio(clean, rawVoice);
+        if (audioBuf) {
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader('Content-Length', audioBuf.length);
+          return res.end(audioBuf);
+        }
+      } catch (fbErr: any) {
+        res.status(500).json({ error: fbErr.message || 'Streaming failed' });
+      }
     }
   }
 });
 
 app.post('/api/synthesize', async (req, res) => {
-  const { text, voice } = req.body;
-  if (!text) {
+  const rawText = sanitizeString(req.body.text, 1000);
+  const voice = sanitizeString(req.body.voice, 64);
+  if (!rawText) {
     return res.status(400).json({ error: 'Text is required' });
   }
 
-  const requestedVoice = voice || 'en-US-JennyNeural';
-  const cacheKey = `${requestedVoice}:${text.trim()}`;
+  const requestedVoice = voice || 'pFZP5JQG7iQjIQuC4Bku';
+  const cacheKey = `${requestedVoice}:${rawText}`;
   const cached = ttsAudioCache.get(cacheKey);
   if (cached) {
     return res.json({ audioBase64: cached.toString('base64'), visemes: [] });
   }
 
   try {
-    const tts = await getEdgeTtsClient(requestedVoice);
-    const result = tts.toStream(text);
-
-    const chunks: Buffer[] = [];
-    result.audioStream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    result.audioStream.on('end', () => {
-      const audioBuffer = Buffer.concat(chunks);
+    const audioBuf = await synthesizeNeuralAudio(rawText, requestedVoice);
+    if (audioBuf) {
       if (ttsAudioCache.size >= MAX_CACHE_ENTRIES) {
         const firstKey = ttsAudioCache.keys().next().value;
         if (firstKey) ttsAudioCache.delete(firstKey);
       }
-      ttsAudioCache.set(cacheKey, audioBuffer);
-      const audioBase64 = audioBuffer.toString('base64');
-      if (!res.headersSent) {
-        res.json({ audioBase64, visemes: [] });
-      }
-    });
-    result.audioStream.on('error', (err: any) => {
-      console.error('Edge TTS stream error:', err);
-      ttsClients.delete(requestedVoice);
-      if (!res.headersSent) {
-        res.status(500).json({ error: err.message });
-      }
-    });
+      ttsAudioCache.set(cacheKey, audioBuf);
+      return res.json({ audioBase64: audioBuf.toString('base64'), visemes: [] });
+    }
+    throw new Error('Synthesis failed');
   } catch (error: any) {
-    console.error('Edge TTS synthesis error:', error);
-    ttsClients.delete(requestedVoice);
+    console.warn('Neural synthesis notice:', error.message);
     if (!res.headersSent) {
       res.status(500).json({ error: error.message || 'Synthesis failed' });
     }
@@ -199,10 +315,20 @@ app.post('/api/synthesize', async (req, res) => {
 app.post('/api/elevenlabs', async (req, res) => {
   const apiKey = (req.headers['xi-api-key'] as string) || req.body.apiKey || ELEVENLABS_KEY;
   if (!apiKey) {
-    return res.status(400).json({ error: 'ElevenLabs API key required. Enter your free API key in the studio panel.' });
+    return res.status(400).json({ error: 'ElevenLabs API key required. Configure your secret API key in the Admin Panel.' });
   }
 
-  const { text, voiceId, modelId } = req.body;
+  const cleanKey = sanitizeString(apiKey, 256);
+  if (!cleanKey.startsWith('sk_')) {
+    return res.status(400).json({
+      error: 'Invalid ElevenLabs API key: Key must begin with "sk_".'
+    });
+  }
+
+  const text = sanitizeString(req.body.text, 1500);
+  const voiceId = sanitizeString(req.body.voiceId, 64);
+  const modelId = sanitizeString(req.body.modelId, 64);
+
   if (!text || !voiceId) {
     return res.status(400).json({ error: 'Text and voiceId are required' });
   }
@@ -217,15 +343,15 @@ app.post('/api/elevenlabs', async (req, res) => {
       },
       {
         headers: {
-          'xi-api-key': apiKey,
+          'xi-api-key': cleanKey,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
-        }
+        },
+        timeout: 20000
       }
     );
     res.json(response.data);
   } catch (error: any) {
-    console.error('ElevenLabs synthesis error', error.response?.data || error.message);
     const detail = error.response?.data?.detail;
     const msg = typeof detail === 'string'
       ? detail
@@ -234,38 +360,30 @@ app.post('/api/elevenlabs', async (req, res) => {
   }
 });
 
-app.post('/api/save-elevenlabs-key', (req, res) => {
+// Admin-protected key management for ElevenLabs
+app.post('/api/save-elevenlabs-key', adminAuthMiddleware, (req, res) => {
   const { apiKey } = req.body;
-  if (apiKey !== undefined) {
-    // Strip newlines and escape replacement special chars to prevent .env injection
-    const rawKey = apiKey.trim().replace(/[\r\n]/g, '');
+  if (apiKey !== undefined && typeof apiKey === 'string') {
+    const rawKey = sanitizeString(apiKey, 256).replace(/[\r\n]/g, '');
     ELEVENLABS_KEY = rawKey;
-    const escapedEL = rawKey.replace(/\$/g, '$$$$');
     try {
-      const envPath = path.resolve(process.cwd(), '.env');
-      let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-      if (envContent.includes('ELEVENLABS_API_KEY=')) {
-        envContent = envContent.replace(/ELEVENLABS_API_KEY=.*/g, `ELEVENLABS_API_KEY=${escapedEL}`);
-      } else {
-        envContent += `\nELEVENLABS_API_KEY=${rawKey}\n`;
-      }
-      fs.writeFileSync(envPath, envContent);
-    } catch (e) {
-      console.warn('Could not write to .env', e);
+      persistEnvVar('ELEVENLABS_API_KEY', rawKey);
+    } catch (e: any) {
+      console.warn('Could not write to .env', e.message);
     }
   }
   res.json({ success: true, configured: !!ELEVENLABS_KEY });
 });
 
 app.get('/api/voices', async (req, res) => {
-  const { backend } = req.query;
+  const backend = sanitizeString(req.query.backend, 32);
 
   if (backend === 'elevenlabs') {
     try {
       const headers: Record<string, string> = {};
       if (ELEVENLABS_KEY) headers['xi-api-key'] = ELEVENLABS_KEY;
 
-      const response = await axios.get('https://api.elevenlabs.io/v1/voices', { headers });
+      const response = await axios.get('https://api.elevenlabs.io/v1/voices', { headers, timeout: 8000 });
       const mapped = (response.data.voices || []).map((v: any) => ({
         id: v.voice_id,
         name: `${v.name} (ElevenLabs)`,
@@ -284,8 +402,28 @@ app.get('/api/voices', async (req, res) => {
   }
 });
 
-app.use('/api/agent', createAgentRouter());
+// Shared AgentCore instance (used by both agent and admin routers)
+const sharedAgentCore = new AgentCore();
+app.use('/api/agent', createAgentRouter(sharedAgentCore));
+
+// Admin panel — protected by admin authentication token, invisible to normal users
+app.use('/api/admin', createAdminRouter(sharedAgentCore));
+
+// ── 6. Safe 404 & Global Error Handling (Zero Stack Leaks in Production) ──────
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found.' });
+});
+
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.warn('[SERVER ERROR CAUGHT]:', err.message);
+  if (res.headersSent) return next(err);
+  const isDev = process.env.NODE_ENV === 'development';
+  res.status(err.status || 500).json({
+    error: isDev ? err.message : 'An unexpected server error occurred.',
+    status: 'error'
+  });
+});
 
 app.listen(PORT, () => {
-  console.log(`TTS proxy server running on http://localhost:${PORT}`);
+  console.log(`TTS proxy server running securely on http://localhost:${PORT} [NODE_ENV=${process.env.NODE_ENV || 'production'}]`);
 });

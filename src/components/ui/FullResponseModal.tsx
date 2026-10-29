@@ -14,9 +14,9 @@ export default function FullResponseModal() {
         className={`w-full max-w-2xl ${SURFACES.modalShell} overflow-hidden flex flex-col max-h-[80vh]`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-[#0F0F12]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A2C33] bg-[#181818]">
           <div className="flex items-center gap-2.5">
-            <FileText size={16} strokeWidth={1.5} className="text-[#8B5CF6]" />
+            <FileText size={16} strokeWidth={1.5} className="text-[#6E8BFF]" />
             <h2 className={TYPO.title}>
               Full AI Assistant Response
             </h2>
@@ -31,13 +31,13 @@ export default function FullResponseModal() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-          <div className="text-[13px] text-white/80 leading-relaxed select-text whitespace-pre-wrap font-sans">
+        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[#181818]">
+          <div className="text-[13px] text-[#F2F2F2]/90 leading-relaxed select-text whitespace-pre-wrap font-sans">
             {lastFullResponse}
           </div>
         </div>
 
-        <div className="px-6 py-3 border-t border-white/[0.06] bg-[#0F0F12] flex items-center justify-end">
+        <div className="px-6 py-3 border-t border-[#2A2C33] bg-[#181818] flex items-center justify-end">
           <button
             type="button"
             onClick={() => setIsFullResponseModalOpen(false)}

@@ -2,51 +2,30 @@ import React, { useMemo } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { resolveAgentConfirmation } from '@/services/agentService';
 import { voiceManager } from '@/services/voiceManager';
-import { TYPO, BUTTONS } from './designSystem';
-import { 
-  AlertCircle, 
-  Loader2, 
-  Zap, 
-  Mic, 
-  Volume2, 
-  CheckCircle2, 
-  XCircle, 
-  Sparkles, 
-  ExternalLink, 
-  Check, 
-  X 
-} from 'lucide-react';
+import { BUTTONS } from './designSystem';
+import { AlertCircle, ExternalLink, Check, X } from 'lucide-react';
 
 export default function LowerThird() {
-  const { 
-    scriptText, 
-    speechText, 
-    currentWordIndex, 
-    playbackState, 
-    isListening, 
+  const {
+    speechText,
+    currentWordIndex,
+    playbackState,
     isSpeaking,
-    agentModeType,
-    agentStatus,
-    currentAgentAction,
     pendingConfirmation,
     setPendingConfirmation,
     setAgentStatus,
     setSpeechText,
     setLastFullResponse,
-    setIsFullResponseModalOpen
+    setIsFullResponseModalOpen,
+    currentEmotion,
+    agentStatus
   } = useAppStore();
 
-  const isVisible = 
-    playbackState === 'playing' || 
-    isListening || 
-    isSpeaking || 
-    agentStatus === 'thinking' || 
-    agentStatus === 'planning' || 
-    agentStatus === 'executing_tool' || 
-    agentStatus === 'completed' ||
-    !!pendingConfirmation;
+  // Box appears while character is actively speaking, loading speech, or has speech text
+  const isAnswering = (isSpeaking || playbackState === 'playing' || playbackState === 'loading' || agentStatus === 'speaking') && !!speechText?.trim();
+  const isVisible = isAnswering || !!pendingConfirmation;
 
-  const activeText = speechText || scriptText;
+  const activeText = speechText || '';
   const words = useMemo(() => activeText.split(/\s+/).filter(Boolean), [activeText]);
 
   const handleConfirmAction = async (approved: boolean) => {
@@ -74,144 +53,64 @@ export default function LowerThird() {
     }
   };
 
-  if (!isVisible && !scriptText.trim()) return null;
+  if (!isVisible) return null;
 
   return (
     <div 
-      className={`fixed bottom-6 left-6 right-[410px] max-md:right-6 max-md:bottom-6 z-40 transition-[transform,opacity] duration-200 ease-out transform-gpu pointer-events-none ${
-        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'
+      className={`w-full max-w-2xl lg:max-w-3xl mx-auto px-4 z-30 transition-[transform,opacity] duration-200 ease-out transform-gpu pointer-events-none mb-3 ${
+        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0 pointer-events-none'
       }`}
     >
-      {/* Solid Dark Layer - Strictly NO backdrop-blur to prevent 3D WebGL GPU flicker */}
-      <div className="bg-[#0F0F12] rounded-2xl px-5 py-3.5 border-l-[3px] border-l-[#8B5CF6] border border-white/[0.06] shadow-[0_16px_48px_rgba(0,0,0,0.6)] pointer-events-auto flex flex-col gap-2">
+      {/* ── Cinematic Teleprompter Glass Capsule ── */}
+      <div className="relative overflow-hidden bg-[#0D0F17]/88 backdrop-blur-2xl rounded-2xl px-5 py-4 border border-white/[0.1] shadow-[0_24px_64px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.1)] pointer-events-auto flex flex-col gap-2.5 transition-all duration-200">
         
-        {/* Dynamic Real Agent State Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.04] pb-2">
-          <div className="flex items-center gap-2">
-            {pendingConfirmation ? (
-              <>
-                <AlertCircle size={13} strokeWidth={1.5} className="text-amber-400" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-amber-300">
-                  Action Confirmation Required
-                </span>
-              </>
-            ) : agentStatus === 'thinking' ? (
-              <>
-                <Loader2 size={13} strokeWidth={1.5} className="text-[#8B5CF6] animate-spin" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-[#8B5CF6]">
-                  Thinking & Analyzing...
-                </span>
-              </>
-            ) : agentStatus === 'planning' ? (
-              <>
-                <Loader2 size={13} strokeWidth={1.5} className="text-[#8B5CF6] animate-spin" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-[#8B5CF6]">
-                  Planning Multi-Step Task...
-                </span>
-              </>
-            ) : agentStatus === 'executing_tool' ? (
-              <>
-                <Zap size={13} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-white/80">
-                  {currentAgentAction || 'Executing Local Tool...'}
-                </span>
-              </>
-            ) : isListening ? (
-              <>
-                <Mic size={13} strokeWidth={1.5} className="text-rose-400" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-rose-400">
-                  Listening to Microphone...
-                </span>
-              </>
-            ) : isSpeaking || playbackState === 'playing' ? (
-              <>
-                <Volume2 size={13} strokeWidth={1.5} className="text-emerald-400" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-emerald-300">
-                  Speaking Response...
-                </span>
-              </>
-            ) : agentStatus === 'completed' ? (
-              <>
-                <CheckCircle2 size={13} strokeWidth={1.5} className="text-emerald-400" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-emerald-300">
-                  Task Completed
-                </span>
-              </>
-            ) : agentStatus === 'error' ? (
-              <>
-                <XCircle size={13} strokeWidth={1.5} className="text-rose-400" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-rose-400">
-                  Action Issue
-                </span>
-              </>
-            ) : (
-              <>
-                <Sparkles size={13} strokeWidth={1.5} className="text-[#8B5CF6]" />
-                <span className={TYPO.label}>
-                  AI Agent Ready • {agentModeType === 'repeat' ? 'Repeat Mode' : 'Agent Mode'}
-                </span>
-              </>
-            )}
-          </div>
-
-          {words.length > 25 && (
-            <button
-              type="button"
-              onClick={handleOpenFullResponse}
-              className={`text-xs px-2.5 py-1 ${BUTTONS.secondary} flex items-center gap-1.5`}
-            >
-              <span>Full Response</span>
-              <ExternalLink size={11} strokeWidth={1.5} />
-            </button>
-          )}
-        </div>
+        {/* Subtle Iridescent Top Accent Hairline */}
+        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#6E8BFF]/70 to-transparent" />
 
         {/* Confirmation Banner */}
-        {pendingConfirmation && (
-          <div className="bg-amber-500/[0.06] border border-amber-500/15 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-1">
-            <div className="text-xs text-amber-100/90 leading-relaxed">
-              <span className="font-semibold text-amber-300">Action: {pendingConfirmation.toolName}</span>
-              <p className="text-[11px] text-amber-200/70 mt-0.5">{pendingConfirmation.description}</p>
+        {pendingConfirmation ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-1.5">
+              <AlertCircle size={13} strokeWidth={1.5} className="text-amber-400" />
+              <span className="text-[11px] font-medium uppercase tracking-wider text-amber-300 font-mono">
+                Action Confirmation Required
+              </span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => handleConfirmAction(true)}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium shadow-[0_2px_8px_rgba(5,150,105,0.25)] transition-[transform,background-color] duration-150 ease-out flex items-center gap-1 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
-              >
-                <Check size={12} strokeWidth={1.5} />
-                <span>Approve</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleConfirmAction(false)}
-                className={`px-3 py-1.5 ${BUTTONS.secondary} text-xs flex items-center gap-1`}
-              >
-                <X size={12} strokeWidth={1.5} />
-                <span>Cancel</span>
-              </button>
+            <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-amber-100/90 leading-relaxed font-sans">
+                <span className="font-semibold text-amber-300">Action: {pendingConfirmation.toolName}</span>
+                <p className="text-[11px] text-amber-200/70 mt-0.5">{pendingConfirmation.description}</p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <button type="button" onClick={() => handleConfirmAction(true)}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-[0_2px_12px_rgba(5,150,105,0.35)] transition-all duration-150 ease-out flex items-center gap-1.5 active:scale-95"
+                >
+                  <Check size={13} strokeWidth={2} /><span>Approve</span>
+                </button>
+                <button type="button" onClick={() => handleConfirmAction(false)}
+                  className={`px-4 py-2 ${BUTTONS.secondary} text-xs font-medium flex items-center gap-1.5`}
+                >
+                  <X size={13} strokeWidth={2} /><span>Cancel</span>
+                </button>
+              </div>
             </div>
           </div>
-        )}
-
-        {/* Subtitle Words with Natural Spacing */}
-        {!pendingConfirmation && (
-          <div className="text-white text-[13px] md:text-[14px] font-normal leading-relaxed max-h-24 overflow-y-auto custom-scrollbar select-text">
-            {words.length > 0 ? (
+        ) : (
+          /* Spoken subtitle words with karaoke illumination */
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-[#F2F2F2] text-[13px] md:text-[14px] font-normal leading-relaxed flex-1 max-h-24 overflow-y-auto custom-scrollbar select-text font-sans">
               <p className="m-0 p-0 whitespace-normal">
                 {words.map((word, i) => {
                   const isCurrent = i === currentWordIndex;
                   return (
                     <React.Fragment key={i}>
-                      <span 
-                        className={`transition-colors duration-150 ${
-                          isCurrent 
-                            ? 'text-white font-medium bg-[#8B5CF6]/20 px-1 py-0.5 rounded' 
-                            : i < currentWordIndex 
-                              ? 'text-white/40' 
-                              : 'text-white/65'
-                        }`}
-                      >
+                      <span className={`transition-all duration-150 inline-block ${
+                        isCurrent
+                          ? 'text-white font-semibold drop-shadow-[0_0_12px_rgba(110,139,255,0.8)] bg-[#6E8BFF]/25 border border-[#6E8BFF]/50 px-1.5 py-0.5 rounded-lg shadow-sm scale-[1.03]'
+                          : i < currentWordIndex
+                          ? 'text-[#F2F2F2]/40'
+                          : 'text-[#F2F2F2]/85'
+                      }`}>
                         {word}
                       </span>
                       {' '}
@@ -219,11 +118,33 @@ export default function LowerThird() {
                   );
                 })}
               </p>
-            ) : (
-              <span className="text-white/40 italic text-xs">
-                {agentStatus === 'thinking' ? 'Analyzing your request...' : 'Ready for voice or text prompt...'}
-              </span>
-            )}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 pt-0.5">
+              {/* Animated Speaking Waveform Indicator */}
+              {(isSpeaking || playbackState === 'playing') && (
+                <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[#6E8BFF]/15 border border-[#6E8BFF]/30 text-[#6E8BFF]">
+                  <span className="w-[2px] h-2.5 bg-[#6E8BFF] rounded-full animate-[pulse_0.6s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-3.5 bg-[#6E8BFF] rounded-full animate-[pulse_0.4s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-2 bg-[#6E8BFF] rounded-full animate-[pulse_0.8s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-3 bg-[#6E8BFF] rounded-full animate-[pulse_0.5s_ease-in-out_infinite]" />
+                </div>
+              )}
+
+              {currentEmotion.primary !== 'neutral' && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#6E8BFF]/15 text-[#6E8BFF] border border-[#6E8BFF]/25 capitalize">
+                  {currentEmotion.primary}
+                </span>
+              )}
+              {words.length > 25 && (
+                <button type="button" onClick={handleOpenFullResponse}
+                  className={`text-xs px-2.5 py-1 ${BUTTONS.secondary} flex items-center gap-1.5`}
+                >
+                  <span>Full</span>
+                  <ExternalLink size={11} strokeWidth={1.5} />
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

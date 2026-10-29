@@ -3,14 +3,38 @@ import path from 'path';
 import { ToolRegistry } from './ToolRegistry';
 import { ToolResult } from '../types';
 
+const BLOCKED_SENSITIVE_NAMES = new Set([
+  '.env',
+  '.env.local',
+  '.env.production',
+  '.env.development',
+  '.git',
+  '.gitignore',
+  'id_rsa',
+  'id_ed25519',
+  'authorized_keys'
+]);
+
 function resolveSafePath(userPath: string): string {
-  if (!userPath || userPath === '.' || userPath === './') {
-    return process.cwd();
+  const root = path.resolve(process.cwd());
+  const clean = (userPath || '.').replace(/[\0\r\n]/g, '');
+
+  const resolved = path.isAbsolute(clean)
+    ? path.resolve(clean)
+    : path.resolve(root, clean);
+
+  // Sandboxing check: ensure path does not escape the project workspace root
+  if (!resolved.startsWith(root)) {
+    throw new Error('Access denied: Path is outside the authorized project workspace.');
   }
-  if (path.isAbsolute(userPath)) {
-    return path.normalize(userPath);
+
+  // File protection check: block access to environment files and sensitive credentials
+  const base = path.basename(resolved).toLowerCase();
+  if (BLOCKED_SENSITIVE_NAMES.has(base) || base.startsWith('.env')) {
+    throw new Error('Access denied: Access to environment variables and secret credentials is restricted.');
   }
-  return path.normalize(path.join(process.cwd(), userPath));
+
+  return resolved;
 }
 
 export function registerFilesystemTools(registry: ToolRegistry): void {

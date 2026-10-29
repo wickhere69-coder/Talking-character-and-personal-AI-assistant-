@@ -6,3 +6,11 @@ data/
 .env.*
 !.env.example
 scratch/
+*.key
+*.pem
+*.cert
+*.sqlite
+*.db
+.DS_Store
+Thumbs.db
+

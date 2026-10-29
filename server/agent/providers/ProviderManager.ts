@@ -1,6 +1,7 @@
 import { IAIProvider } from './IAIProvider';
 import { GrokProvider } from './GrokProvider';
 import { GeminiProvider } from './GeminiProvider';
+import { LangGraphProvider } from './LangGraphProvider';
 import { LocalModelProvider } from './LocalModelProvider';
 import { FallbackLocalProvider } from './FallbackLocalProvider';
 import { AgentConfig, AgentMessage, ToolDefinition, ProviderResponse } from '../types';
@@ -9,12 +10,13 @@ export class ProviderManager {
   private providers: Map<string, IAIProvider> = new Map();
   private defaultProviderName: string;
 
-  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'gemini') {
+  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'auto') {
     this.defaultProviderName = defaultProviderName;
 
     // Register supported providers
     this.registerProvider(new GeminiProvider());
     this.registerProvider(new GrokProvider());
+    this.registerProvider(new LangGraphProvider());
     this.registerProvider(new LocalModelProvider());
     this.registerProvider(new FallbackLocalProvider());
   }
@@ -35,10 +37,12 @@ export class ProviderManager {
   }
 
   /**
-   * Resolves the active provider instantly by checking configured keys.
-   * Eliminates sequential network probe timeouts on user chat requests.
+   * Resolves the active provider dynamically based on query requirements:
+   * - Deep Reasoning / Math / Logic / Coding queries -> LangGraph Multi-Node Engine
+   * - Speed Dialogue / Conversational queries -> Gemini Flash-Lite Low-Latency Engine
+   * - Explicit overrides from Admin Panel are always strictly honored.
    */
-  async getActiveProvider(overrideName?: string): Promise<IAIProvider> {
+  async getActiveProvider(overrideName?: string, userMessage?: string): Promise<IAIProvider> {
     const target = overrideName || this.defaultProviderName;
 
     // Instant / local fallback
@@ -46,28 +50,52 @@ export class ProviderManager {
       return this.providers.get('local_fallback')!;
     }
 
-    // Explicit provider requested
-    if (target !== 'auto' && this.providers.has(target)) {
-      const explicit = this.providers.get(target)!;
-      // Fast check: If provider requires an API key and has none, skip to free cloud or local
-      if ('getApiKey' in explicit && typeof (explicit as any).getApiKey === 'function') {
-        const key = (explicit as any).getApiKey();
-        if (!key) {
-          console.log(`[PROVIDER] ${target} has no API key configured, using free cloud reasoning fallback`);
-          return this.providers.get('free_cloud') || this.providers.get('local_fallback')!;
-        }
+    // Dynamic AI Model Auto-Switching:
+    // Route complex math, logic, algorithms, and deep analysis to LangGraph Multi-Step Reasoning
+    const isReasoning = userMessage ? this.isComplexReasoningQuery(userMessage) : false;
+    const geminiKey = process.env.GEMINI_API_KEY?.trim();
+
+    if (geminiKey) {
+      // If query is complex reasoning, or explicitly requested langgraph, route to LangGraph
+      if (target === 'langgraph') {
+        const langgraph = this.providers.get('langgraph');
+        if (langgraph) return langgraph;
       }
-      return explicit;
+
+      // If explicit other provider requested (e.g. grok)
+      if (target !== 'auto' && target !== 'gemini' && this.providers.has(target)) {
+        const explicit = this.providers.get(target)!;
+        return explicit;
+      }
+
+      const gemini = this.providers.get('gemini');
+      if (gemini) return gemini;
     }
 
-    // Auto resolution: prioritize Gemini (free, high-reasoning)
-    const gemini = this.providers.get('gemini');
-    if (gemini && 'getApiKey' in gemini && (gemini as any).getApiKey()) {
-      return gemini;
+    // Explicit provider requested (Admin Console selection)
+    if (target !== 'auto' && this.providers.has(target)) {
+      const explicit = this.providers.get(target)!;
+      return explicit;
     }
 
     // Fallback to local
     return this.providers.get('local_fallback')!;
+  }
+
+  private isComplexReasoningQuery(msg: string): boolean {
+    const lower = msg.toLowerCase().trim();
+    const mathPatterns = [/\d+\s*[\+\-\*\/]\s*\d+/, /equation/, /calculate/, /integral/, /derivative/, /algebra/, /geometry/, /percentage/];
+    const reasoningKeywords = [
+      'solve', 'prove', 'step by step', 'logic', 'paradox', 'bat and a ball',
+      'machines take', 'train leaves', 'how many', 'explain why', 'difference between',
+      'algorithm', 'time complexity', 'optimize', 'critique', 'deep analysis',
+      'philosophical', 'suppose that', 'assume that', 'riddle', 'puzzle', 'why does'
+    ];
+
+    if (mathPatterns.some(p => p.test(lower))) return true;
+    if (reasoningKeywords.some(k => lower.includes(k))) return true;
+    if (lower.split(/\s+/).length > 20 && lower.includes('?')) return true;
+    return false;
   }
 
   async getHealth(): Promise<{
@@ -78,13 +106,17 @@ export class ProviderManager {
     const active = await this.getActiveProvider();
     const modelInfo = await active.getModelInfo();
 
-    const availableProviders: Array<{ name: string; available: boolean }> = [];
-    for (const [name, provider] of this.providers) {
-      availableProviders.push({
-        name,
-        available: await provider.isAvailable()
-      });
-    }
+    const availableProviders = await Promise.all(
+      Array.from(this.providers.entries()).map(async ([name, provider]) => {
+        try {
+          const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500));
+          const available = await Promise.race([provider.isAvailable(), timeoutPromise]);
+          return { name, available };
+        } catch {
+          return { name, available: false };
+        }
+      })
+    );
 
     return {
       activeProvider: active.getName(),
@@ -98,7 +130,8 @@ export class ProviderManager {
     tools: ToolDefinition[],
     config: AgentConfig
   ): Promise<{ response: ProviderResponse; providerUsed: string }> {
-    const provider = await this.getActiveProvider(config.modelProvider);
+    const userMessage = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+    const provider = await this.getActiveProvider(config.modelProvider, userMessage);
 
     if (provider.getName() === 'local_fallback') {
       const response = await provider.generateResponse(messages, tools, config);
@@ -106,9 +139,11 @@ export class ProviderManager {
     }
 
     try {
+      const isMultiStep = provider.getName() === 'langgraph';
+      const timeoutMs = isMultiStep ? 30000 : 25000;
       let timeoutId: ReturnType<typeof setTimeout>;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Timeout: ${provider.getName()} exceeded 25s limit`)), 25000);
+        timeoutId = setTimeout(() => reject(new Error(`Timeout: ${provider.getName()} exceeded ${timeoutMs / 1000}s limit`)), timeoutMs);
       });
 
       const response = await Promise.race([
@@ -116,9 +151,13 @@ export class ProviderManager {
         timeoutPromise
       ]);
 
+      const label = provider.getName() === 'langgraph' 
+        ? 'LangGraph (Deep Reasoning Engine)' 
+        : (provider.getName() === 'gemini' ? 'Google Gemini Flash-Lite' : provider.getName());
+
       return {
         response,
-        providerUsed: provider.getName()
+        providerUsed: label
       };
     } catch (err: any) {
       console.warn(`[PROVIDER SPEED GUARD] Provider ${provider.getName()} notice (${err.message}), falling back to local.`);
@@ -141,7 +180,8 @@ export class ProviderManager {
     onChunk: (delta: string) => void,
     signal?: AbortSignal
   ): Promise<{ response: ProviderResponse; providerUsed: string }> {
-    const provider = await this.getActiveProvider(config.modelProvider);
+    const userMessage = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+    const provider = await this.getActiveProvider(config.modelProvider, userMessage);
 
     if (provider.getName() === 'local_fallback' || typeof (provider as any).generateResponseStream !== 'function') {
       const response = await provider.generateResponse(messages, tools, config);
@@ -163,9 +203,14 @@ export class ProviderManager {
       if (!response || !response.content || !response.content.trim()) {
         throw new Error(`${provider.getName()} stream yielded empty response`);
       }
+
+      const label = provider.getName() === 'langgraph' 
+        ? 'LangGraph (Deep Reasoning Engine)' 
+        : (provider.getName() === 'gemini' ? 'Google Gemini Flash-Lite' : provider.getName());
+
       return {
         response,
-        providerUsed: provider.getName()
+        providerUsed: label
       };
     } catch (err: any) {
       if (signal?.aborted) {

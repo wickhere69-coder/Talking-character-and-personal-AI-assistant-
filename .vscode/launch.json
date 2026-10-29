@@ -1,5 +1,6 @@
 {
     "configurations": [
+        
         {
             "type": "chrome",
             "name": "http://localhost:5173/",

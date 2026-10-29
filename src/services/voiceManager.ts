@@ -1,6 +1,7 @@
 import { useAppStore } from '@/store/appStore';
 import { synthesize } from './ttsService';
 import { speakText, stopAllAudioAndSpeech } from './webSpeechService';
+import { ELEVENLABS_VOICE_PACK } from './elevenLabsService';
 import type { VoiceOption } from '@/types';
 
 export interface PlayOptions {
@@ -60,16 +61,18 @@ class VoicePlaybackManager {
     if (this.audioElement) {
       this.audioElement.onended = () => {
         if (this.activeChannel === 'audio') {
-          console.log('[AUDIO STOP] HTML5 Audio playback ended naturally');
-          
           // Seamless transition: only reset speaking and playback state if no more queued sentences exist
           const hasMoreSentences = this.isQueueMode && this.sentenceQueue.length > 0;
           if (!hasMoreSentences) {
             this.activeChannel = null;
-            useAppStore.getState().setPlaybackState('idle');
-            useAppStore.getState().setIsSpeaking(false);
-            useAppStore.getState().setSpeechText('');
-            useAppStore.getState().setCurrentWordIndex(-1);
+            const state = useAppStore.getState();
+            state.setPlaybackState('idle');
+            state.setIsSpeaking(false);
+            state.setSpeechText('');
+            state.setCurrentWordIndex(-1);
+            if (state.agentStatus === 'speaking') {
+              state.setAgentStatus('idle');
+            }
           }
 
           if (this.currentSentenceEndCallback) {
@@ -85,9 +88,13 @@ class VoicePlaybackManager {
         if (this.activeChannel === 'audio') {
           console.warn('[AUDIO STOP] HTML5 Audio error occurred:', e);
           this.activeChannel = null;
-          useAppStore.getState().setPlaybackState('idle');
-          useAppStore.getState().setIsSpeaking(false);
-          useAppStore.getState().setSpeechText('');
+          const state = useAppStore.getState();
+          state.setPlaybackState('idle');
+          state.setIsSpeaking(false);
+          state.setSpeechText('');
+          if (state.agentStatus === 'speaking') {
+            state.setAgentStatus('idle');
+          }
 
           if (this.currentSentenceEndCallback) {
             const cb = this.currentSentenceEndCallback;
@@ -145,9 +152,6 @@ class VoicePlaybackManager {
     this.onQueueEmptyCallback = null;
     this.isQueueMode = false;
 
-    const currentSession = this.currentSessionId;
-    console.log(`[AUDIO STOP] Stopping all audio and speech (Session: ${currentSession}, Reason: ${reason})`);
-
     // 1. Abort any in-flight TTS API requests
     if (this.activeAbortController) {
       try {
@@ -187,20 +191,14 @@ class VoicePlaybackManager {
     const cleanName = voice.name.replace(/\(ElevenLabs\)|\(Neural\)|\(Female\)/g, '').trim();
     const sampleGreeting = `Hello! I'm ${cleanName}. Nice to meet you.`;
 
-    if (voice.backend === 'elevenlabs' && voice.previewUrl) {
-      console.log(`[AUDIO PLAY] Previewing ElevenLabs voice sample: ${voice.name}`);
+    if (voice.previewUrl) {
       this.activeChannel = 'audio';
       store.setSpeechText(voice.sampleText || sampleGreeting);
       store.setAudioUrl(voice.previewUrl);
       await this.playAudioWithSync(voice.previewUrl, sessionId);
-    } else if (voice.backend === 'azure') {
-      console.log(`[AUDIO PLAY] Speaking Neural voice preview for: ${voice.name}`);
-      store.setSpeechText(sampleGreeting);
-      await this.playWithAzure(sampleGreeting, voice, sessionId);
     } else {
-      console.log(`[AUDIO PLAY] Speaking WebSpeech preview for: ${voice.name}`);
       store.setSpeechText(sampleGreeting);
-      this.playWithWebSpeech(sampleGreeting, voice, sessionId);
+      await this.playWithElevenLabs(sampleGreeting, voice, undefined, sessionId);
     }
   }
 
@@ -214,39 +212,45 @@ class VoicePlaybackManager {
     this.onQueueEmptyCallback = onTurnComplete || null;
   }
 
-  /**
-   * Resolve currently active voice option.
-   */
   public resolveCurrentVoice(): VoiceOption {
     const store = useAppStore.getState();
-    const savedVoiceId = typeof window !== 'undefined' ? localStorage.getItem('talking_character_selected_voice') : null;
+    const targetId = store.selectedVoice || (typeof window !== 'undefined' ? localStorage.getItem('talking_character_selected_voice') : null);
+
+    if (targetId && targetId !== 'hpp4J3VqNfWAUOO0d1Us' && targetId !== 'en-US-JennyNeural') {
+      const match = store.voices.find((v) => v.id === targetId) || ELEVENLABS_VOICE_PACK.find((v) => v.id === targetId);
+      if (match) return match;
+    }
+
     return (
-      store.voices.find((v) => v.id === store.selectedVoice) ||
-      (savedVoiceId ? store.voices.find((v) => v.id === savedVoiceId) : null) ||
-      store.voices.find((v) => v.backend === 'azure') ||
-      store.voices[0] ||
-      {
-        id: 'en-US-JennyNeural',
-        name: 'Jenny (Neural)',
-        lang: 'en-US',
-        backend: 'azure',
-        gender: 'female'
-      }
+      store.voices.find((v) => v.id === 'pFZP5JQG7iQjIQuC4Bku') ||
+      ELEVENLABS_VOICE_PACK.find((v) => v.id === 'pFZP5JQG7iQjIQuC4Bku') ||
+      ELEVENLABS_VOICE_PACK[0] ||
+      store.voices[0]
     );
   }
 
   /**
-   * Pre-fetches neural TTS audio in the background into an in-memory Blob URL for zero-gap playback.
+   * Pre-fetches ElevenLabs TTS audio in the background into an in-memory Blob URL for zero-gap playback.
    */
   private async prefetchSentenceAudio(text: string, voice: VoiceOption): Promise<string | null> {
     try {
-      const url = `/api/tts-stream?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}&rate=${encodeURIComponent('+3%')}&pitch=${encodeURIComponent('+1Hz')}`;
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      this.activeBlobUrls.push(blobUrl);
-      return blobUrl;
+      const key = typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
+      if (key && key.startsWith('sk_')) {
+        const res = await synthesize(text, voice.id, 'elevenlabs', key);
+        if (res?.audioUrl) {
+          this.activeBlobUrls.push(res.audioUrl);
+          return res.audioUrl;
+        }
+      }
+      const streamUrl = `/api/tts-stream?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}`;
+      const res = await fetch(streamUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        this.activeBlobUrls.push(blobUrl);
+        return blobUrl;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -370,23 +374,13 @@ class VoicePlaybackManager {
     store.setError(null);
 
     const voice = this.resolveCurrentVoice();
-    const hasElevenLabs = !!store.availableBackends.elevenlabs && !!(typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') : null);
-
-    if (hasElevenLabs && voice.backend === 'elevenlabs') {
-      await this.playWithElevenLabs(trimmed, voice, undefined, sessionId);
-    } else if (voice.backend === 'azure') {
-      await this.playWithAzure(trimmed, voice, sessionId, preloadedUrl);
-    } else if (voice.backend === 'elevenlabs') {
-      const fallbackNeural = store.voices.find((v) => v.backend === 'azure') || {
-        id: 'en-US-JennyNeural',
-        name: 'Jenny (Neural)',
-        lang: 'en-US',
-        backend: 'azure',
-        gender: 'female'
-      };
-      await this.playWithAzure(trimmed, fallbackNeural, sessionId, preloadedUrl);
+    if (preloadedUrl) {
+      this.activeChannel = 'audio';
+      store.setVisemeQueue([]);
+      store.setAudioUrl(preloadedUrl);
+      await this.playAudioWithSync(preloadedUrl, sessionId);
     } else {
-      this.playWithWebSpeech(trimmed, voice, sessionId);
+      await this.playWithElevenLabs(trimmed, voice, undefined, sessionId);
     }
   }
 
@@ -416,49 +410,15 @@ class VoicePlaybackManager {
     this.stopAll('new_speech_request');
     const sessionId = this.currentSessionId;
 
-    console.log(`[TTS REQUEST] Session ${sessionId} initiating (instant=${forceInstant}) for: "${text.substring(0, 60)}..."`);
-
     const store = useAppStore.getState();
     store.setSpeechText(text);
     store.setPlaybackState('loading');
     store.setError(null);
 
-    // Resolve voice: strictly respect user's chosen voice, defaulting to primary studio voice
-    const savedVoiceId = typeof window !== 'undefined' ? localStorage.getItem('talking_character_selected_voice') : null;
-    const voice: VoiceOption = 
-      activeVoice ||
-      store.voices.find((v) => v.id === store.selectedVoice) ||
-      (savedVoiceId ? store.voices.find((v) => v.id === savedVoiceId) : null) ||
-      store.voices.find((v) => v.backend === 'azure') ||
-      store.voices[0] ||
-      {
-        id: 'en-US-JennyNeural',
-        name: 'Jenny (Neural)',
-        lang: 'en-US',
-        backend: 'azure',
-        gender: 'female'
-      };
+    // Resolve voice: strictly ElevenLabs voice
+    const voice: VoiceOption = activeVoice || this.resolveCurrentVoice();
 
-    const hasElevenLabs = !!elevenLabsApiKey || !!(typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') : null);
-
-    if (forceInstant || voice.backend === 'webSpeech') {
-      this.playWithWebSpeech(text, voice, sessionId);
-    } else if (hasElevenLabs && voice.backend === 'elevenlabs') {
-      await this.playWithElevenLabs(text, voice, elevenLabsApiKey, sessionId);
-    } else if (voice.backend === 'azure') {
-      await this.playWithAzure(text, voice, sessionId);
-    } else if (voice.backend === 'elevenlabs') {
-      const fallbackNeural = store.voices.find((v) => v.backend === 'azure') || {
-        id: 'en-US-JennyNeural',
-        name: 'Jenny (Neural)',
-        lang: 'en-US',
-        backend: 'azure',
-        gender: 'female'
-      };
-      await this.playWithAzure(text, fallbackNeural, sessionId);
-    } else {
-      this.playWithWebSpeech(text, voice, sessionId);
-    }
+    await this.playWithElevenLabs(text, voice, elevenLabsApiKey, sessionId);
   }
 
   /**
@@ -490,11 +450,16 @@ class VoicePlaybackManager {
         settled = true;
         cleanup();
         if (sessionId === this.currentSessionId) {
-          console.log(`[AUDIO PLAY] Sound started emitting (Session: ${sessionId})`);
           store.setPlaybackState('playing');
           store.setIsSpeaking(true);
         }
         resolve();
+      };
+
+      const onTimeUpdate = () => {
+        if (!settled && audio.currentTime > 0) {
+          onPlaying();
+        }
       };
 
       const onError = (e: any) => {
@@ -507,33 +472,38 @@ class VoicePlaybackManager {
       const cleanup = () => {
         if (timeoutTimer) clearTimeout(timeoutTimer);
         audio.removeEventListener('playing', onPlaying);
+        audio.removeEventListener('timeupdate', onTimeUpdate);
         audio.removeEventListener('error', onError);
       };
 
-      // Network buffering guard: 7000ms timeout
+      // Network buffering guard: 25000ms timeout
       const timeoutTimer = setTimeout(() => {
         if (!settled) {
           settled = true;
           cleanup();
           this.hardStopAudio();
-          reject(new Error('Audio stream buffering timeout exceeded (>7000ms)'));
+          reject(new Error('Audio stream buffering timeout exceeded (>25000ms)'));
         }
-      }, 7000);
+      }, 25000);
 
       audio.addEventListener('playing', onPlaying);
+      audio.addEventListener('timeupdate', onTimeUpdate);
       audio.addEventListener('error', onError);
 
       if (audio.src !== url) {
         audio.src = url;
       }
-      audio.currentTime = 0;
+      try {
+        if (audio.currentTime !== 0) audio.currentTime = 0;
+      } catch {}
 
       audio.play().then(() => {
-        // Fallback if 'playing' event already fired or was missed
+        // Fallback if 'playing' event already fired or audio is advancing
         if (!audio.paused && !settled) {
           onPlaying();
         }
       }).catch((err) => {
+        console.warn('[AUDIO PLAY] audio.play() rejected:', err);
         if (!settled) {
           settled = true;
           cleanup();
@@ -553,7 +523,6 @@ class VoicePlaybackManager {
     preloadedUrl?: string
   ): Promise<void> {
     try {
-      console.log(`[TTS REQUEST] Streaming Neural Audio (Session: ${sessionId}, Voice: ${voice.name}, preloaded=${!!preloadedUrl})`);
       const streamUrl = preloadedUrl || `/api/tts-stream?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}&s=${sessionId}`;
 
       // Verify this session is still active
@@ -571,10 +540,16 @@ class VoicePlaybackManager {
       if (sessionId !== this.currentSessionId) return;
 
       console.warn(`[TTS REQUEST] Neural stream notice:`, err?.message || err);
-      // HARD CANCEL AND PURGE any HTML5 audio so it NEVER plays in background alongside WebSpeech
       this.hardStopAudio();
-      useAppStore.getState().setAudioUrl(null);
-      this.playWithWebSpeech(text, voice, sessionId);
+      const store = useAppStore.getState();
+      store.setAudioUrl(null);
+      store.setPlaybackState('idle');
+      store.setIsSpeaking(false);
+      // Strictly prevent fallback to default browser system voice (speechSynthesis)
+      // Keep character locked exclusively to Lily voice pack
+      if (err?.message) {
+        store.setError(`Lily voice notice: ${err.message}`);
+      }
     }
   }
 
@@ -590,18 +565,21 @@ class VoicePlaybackManager {
     this.activeAbortController = new AbortController();
     const key = apiKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');
 
+    // Fast-path: Valid ElevenLabs API keys always start with 'sk_'.
+    // If key is missing or not a valid sk_ key, skip directly to ultra-fast Studio Neural Edge TTS.
+    if (!key || !key.startsWith('sk_')) {
+      await this.playWithAzure(text, voice, sessionId);
+      return;
+    }
+
     try {
-      console.log(`[TTS REQUEST] Synthesizing ElevenLabs audio (Session: ${sessionId}, Voice: ${voice.name})`);
       const res = await synthesize(text, voice.id, 'elevenlabs', key, undefined, this.activeAbortController.signal);
 
-      // Verify this session is still the active, non-cancelled session
       if (sessionId !== this.currentSessionId) {
-        console.log(`[TTS REQUEST] Discarding stale ElevenLabs response (Session ${sessionId} != ${this.currentSessionId})`);
         return;
       }
 
       if (res && res.audioUrl) {
-        console.log(`[AUDIO PLAY] Playing ElevenLabs audio via HTML5 <audio> (Session: ${sessionId})`);
         this.activeChannel = 'audio';
 
         const store = useAppStore.getState();
@@ -616,7 +594,6 @@ class VoicePlaybackManager {
       if (sessionId !== this.currentSessionId) return;
 
       if (err.name === 'AbortError') {
-        console.log(`[TTS REQUEST] ElevenLabs request successfully aborted (Session: ${sessionId})`);
         return;
       }
 
@@ -630,16 +607,8 @@ class VoicePlaybackManager {
         store.setError(`ElevenLabs notice: ${err?.message || 'Synthesis unavailable'}. Speaking via Studio Neural HD voice.`);
       }
 
-      // Seamless fallback to natural female voice
-      const fallbackVoice: VoiceOption = 
-        store.voices.find(v => v.backend === 'webSpeech') || {
-          id: 'default-female',
-          name: 'Studio Natural Voice',
-          lang: 'en-US',
-          backend: 'webSpeech',
-          gender: 'female'
-        };
-      this.playWithWebSpeech(text, fallbackVoice, sessionId);
+      // Stream high quality Studio Neural audio (Lily: British English Velvety Narrator)
+      await this.playWithAzure(text, voice, sessionId);
     } finally {
       if (sessionId === this.currentSessionId) {
         this.activeAbortController = null;
@@ -657,7 +626,6 @@ class VoicePlaybackManager {
   ): void {
     if (sessionId !== this.currentSessionId) return;
 
-    console.log(`[AUDIO PLAY] Speaking via WebSpeech SpeechSynthesis (Session: ${sessionId}, Voice: ${voice?.name || 'default'})`);
     this.activeChannel = 'webspeech';
 
     const store = useAppStore.getState();
@@ -669,8 +637,9 @@ class VoicePlaybackManager {
     store.setIsSpeaking(false);
 
     speakText(text, voice?.id || null, {
-      rate: voice?.rate !== undefined ? voice.rate : 1.0,
-      pitch: voice?.pitch !== undefined ? voice.pitch : 1.0,
+      lang: voice?.lang || 'en-GB',
+      rate: voice?.rate !== undefined ? voice.rate : 0.92,
+      pitch: voice?.pitch !== undefined ? voice.pitch : 0.95,
       onBoundary: (charIndex) => {
         if (sessionId !== this.currentSessionId) return;
         const textUpToChar = text.substring(0, charIndex);
@@ -680,18 +649,19 @@ class VoicePlaybackManager {
       },
       onStart: () => {
         if (sessionId !== this.currentSessionId) return;
-        console.log(`[AUDIO PLAY] WebSpeech utterance started (Session: ${sessionId})`);
         store.setPlaybackState('playing');
         store.setIsSpeaking(true);
       },
       onEnd: () => {
         if (sessionId !== this.currentSessionId) return;
-        console.log(`[AUDIO STOP] WebSpeech utterance ended (Session: ${sessionId})`);
         this.activeChannel = null;
         store.setPlaybackState('idle');
         store.setIsSpeaking(false);
         store.setCurrentWordIndex(-1);
         store.setSpeechText('');
+        if (store.agentStatus === 'speaking') {
+          store.setAgentStatus('idle');
+        }
 
         if (this.currentSentenceEndCallback) {
           const cb = this.currentSentenceEndCallback;
@@ -708,6 +678,9 @@ class VoicePlaybackManager {
         store.setPlaybackState('idle');
         store.setIsSpeaking(false);
         store.setSpeechText('');
+        if (store.agentStatus === 'speaking') {
+          store.setAgentStatus('idle');
+        }
 
         if (this.currentSentenceEndCallback) {
           const cb = this.currentSentenceEndCallback;
