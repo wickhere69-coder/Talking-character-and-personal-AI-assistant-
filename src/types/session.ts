@@ -4,9 +4,11 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: number;
-  status: 'sent' | 'delivered' | 'streaming' | 'error';
+  status: 'sent' | 'delivered' | 'streaming' | 'error' | 'pending' | 'failed';
   modelUsed?: string;
   audioDurationMs?: number;
+  interrupted?: boolean;
+  pending?: boolean;
   attachment?: {
     name: string;
     type: string;

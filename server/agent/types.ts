@@ -117,6 +117,7 @@ export type AgentExecutionStatus =
 export interface AgentChatResponse {
   response: string;
   status: AgentExecutionStatus;
+  sessionId?: string;
   toolsExecuted?: Array<{
     name: string;
     parameters: Record<string, any>;

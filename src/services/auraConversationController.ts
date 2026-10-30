@@ -362,9 +362,19 @@ class AuraConversationController {
 
       if (this.streamAbort?.signal.aborted) return;
 
-      // Race guard: If user switched sessions while LLM was processing, drop response from old session
+      // Session switch guard: If user switched sessions while LLM was processing, save response into the original session!
       if (currentSessionId && useSessionStore.getState().activeSessionId !== currentSessionId) {
-        console.log('[Aura] Session switched during inference; discarding response from previous session.');
+        console.log('[Aura] Session switched during inference; persisting completed response to original session.');
+        useSessionStore.getState().appendLocalMessage({
+          id: `msg_a_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          sessionId: currentSessionId,
+          role: 'assistant',
+          content: res.response,
+          createdAt: Date.now(),
+          status: 'delivered',
+          modelUsed: res.modelUsed
+        });
+        this.isProcessingOrSpeaking = false;
         return;
       }
 

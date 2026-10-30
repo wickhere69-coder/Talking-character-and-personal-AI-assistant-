@@ -47,6 +47,9 @@ export class ContextManager {
     // ── Session Context Assembly (Priority Order) ──────────────────────────
     let sessionContextBlock = '';
     let retrievedContextBlock = '';
+    let lastExchangeBlock = '';
+    let interruptedBlock = '';
+    let historyMsgs: ChatMessage[] = [];
 
     if (sessionId) {
       const sessionData = this.sessionManager.getSession(sessionId);
@@ -69,9 +72,28 @@ export class ContextManager {
 
         sessionContextBlock = `\n\n[Active Session Context]\n${titleLine}\n${topicLine}${
           summaryLines.length > 0 ? '\n' + summaryLines.join('\n') : ''
-        }\nUse this context when relevant to maintain conversation continuity, but always prioritize directly answering the user's question and achieving their goal.`;
+        }`;
 
-        // 3. Relevant Historical Exchanges Retrieved from Older Turns
+        // Filter messages to completed history turns (excluding current in-flight pending turn)
+        historyMsgs = (sessionData.messages || []).filter(m => !m.pending && m.content !== userMessage);
+
+        // 3. Explicit Last Exchange in This Conversation
+        if (historyMsgs.length > 0) {
+          const lastAssistant = [...historyMsgs].reverse().find(m => m.role === 'assistant');
+          const lastUser = [...historyMsgs].reverse().find(m => m.role === 'user');
+
+          if (lastUser || lastAssistant) {
+            const uText = lastUser ? lastUser.content : '(none)';
+            const aText = lastAssistant ? lastAssistant.content : '(none)';
+            lastExchangeBlock = `\n\n[Last Exchange in This Conversation]\nUser previously asked: "${uText}"\nAura previously answered: "${aText}"`;
+          }
+
+          if (lastAssistant?.interrupted) {
+            interruptedBlock = `\n\n[Interrupted Answer Notice]\nThe previous answer was interrupted part-way through: "${lastAssistant.content}".\nIf the user says continue / go on, resume from that partial answer, do not restart the topic and do not claim it never happened.`;
+          }
+        }
+
+        // 4. Relevant Historical Exchanges Retrieved from Older Turns
         const retrievedOlderMessages = this.sessionManager.retrieveRelevantMessages(
           sessionId,
           userMessage,
@@ -90,6 +112,17 @@ export class ContextManager {
       }
     }
 
+    const continuityDirective = `\n\n[Conversation Continuity & Follow-Up Rules]
+1. References & Pronouns: Pronouns and follow-ups ("that", "the second one", "tell me more", "and then?", "continue", "what did I just ask?", "what were we talking about?") refer directly to the last exchange and session context above. Do not treat a follow-up as a new, unrelated question.
+2. Recall: If the user asks "what did I just ask?" or "what was my last question?", state the user's previous question accurately and concisely.
+3. Resumption: If the user says "continue", "go on", or resumes after a pause/reload, pick up smoothly from the previous answer or partial answer without starting from scratch. A natural brief resumption cue like "Picking up where we left off — you were asking about X" is welcome when resuming.
+4. Fresh Sessions: In a fresh session without prior exchanges, do not invent or reference topics from other sessions.`;
+
+    const longTermMemoryBlock = [
+      prefSummary ? `[Known User Preferences (Long-term profile)]\n${prefSummary}` : '',
+      recallSummary ? `[Relevant Long-Term Memories (Cross-session knowledge)]\n${recallSummary}` : ''
+    ].filter(Boolean).join('\n\n');
+
     // ── Conversational Mode: direct, warm, concise ──────────────────────────
     const conversationalPrompt = `You are a warm, articulate, intelligent, and deeply helpful AI assistant and personal companion.
 ${temporalContext}
@@ -101,7 +134,7 @@ Critical Spoken Voice Rules:
 2. Spoken Cadence (2 to 4 Sentences): Keep turns natural and articulate (typically 2 to 4 spoken sentences). Never monologue or dump raw lists.
 3. Zero Robotic Boilerplate: NEVER say "How may I assist you today", "I am ready to help", "As an AI language model", or "Is there anything else I can do for you".
 4. Pure Spoken English: NEVER output markdown, asterisks (*), hashtags (#), bullet points, or numbered lists. Every single word will be spoken aloud by a neural voice synthesizer.
-${prefSummary ? `Known User Preferences:\n${prefSummary}\n` : ''}${recallSummary ? `Relevant Memories:\n${recallSummary}\n` : ''}${sessionContextBlock}${retrievedContextBlock}`.trim();
+${sessionContextBlock}${lastExchangeBlock}${interruptedBlock}${retrievedContextBlock}${continuityDirective}${longTermMemoryBlock ? '\n\n' + longTermMemoryBlock : ''}`.trim();
 
     // ── Standard Agent Mode: comprehensive, capable, thorough ────────────────
     const standardPrompt = `You are an intelligent, articulate, and highly knowledgeable AI Assistant and personal companion.
@@ -116,7 +149,7 @@ Capabilities & Guidelines:
 - Provide natural, satisfying, and articulate answers suitable for spoken conversation.
 - Always focus on achieving the user's goal directly and accurately.
 - Never use markdown asterisks, hashtags, or bullet lists in your spoken response.
-${prefSummary ? `Preferences:\n${prefSummary}\n` : ''}${recallSummary ? `Memories:\n${recallSummary}\n` : ''}${sessionContextBlock}${retrievedContextBlock}`.trim();
+${sessionContextBlock}${lastExchangeBlock}${interruptedBlock}${retrievedContextBlock}${continuityDirective}${longTermMemoryBlock ? '\n\n' + longTermMemoryBlock : ''}`.trim();
 
     const systemPrompt = isConversational ? conversationalPrompt : standardPrompt;
 
@@ -125,19 +158,18 @@ ${prefSummary ? `Preferences:\n${prefSummary}\n` : ''}${recallSummary ? `Memorie
     ];
 
     // Sliding window of recent history for this session
-    let effectiveRecentMessages = recentMessages;
+    // Strict session isolation: if sessionId is present, use ONLY this session's history
+    let effectiveRecentMessages: AgentMessage[] = [];
     if (sessionId) {
-      const sessionMsgs = this.sessionManager.getMessages(sessionId, this.maxHistoryTurns);
-      if (sessionMsgs.length > 0) {
-        effectiveRecentMessages = sessionMsgs.map(m => ({
-          role: m.role,
-          content: m.content
-        }));
-      }
+      effectiveRecentMessages = historyMsgs.slice(-this.maxHistoryTurns).map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content
+      }));
+    } else {
+      effectiveRecentMessages = recentMessages.slice(-this.maxHistoryTurns);
     }
 
-    const trimmedHistory = effectiveRecentMessages.slice(-this.maxHistoryTurns);
-    messages.push(...trimmedHistory);
+    messages.push(...effectiveRecentMessages);
 
     // Current user message
     messages.push({ role: 'user', content: userMessage });

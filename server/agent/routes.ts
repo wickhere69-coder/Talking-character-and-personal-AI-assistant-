@@ -74,7 +74,7 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
       );
 
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ done: true, fullResponse: result.response, modelUsed: result.modelUsed })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true, fullResponse: result.response, modelUsed: result.modelUsed, sessionId: result.sessionId })}\n\n`);
         res.end();
       }
     } catch (err: any) {

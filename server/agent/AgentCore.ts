@@ -157,7 +157,27 @@ export class AgentCore {
     onChunk: (chunk: string) => void,
     signal?: AbortSignal,
     sessionId?: string
-  ): Promise<{ response: string; modelUsed: string }> {
+  ): Promise<{ response: string; modelUsed: string; sessionId: string }> {
+    const sessionManager = this.contextManager.getSessionManager();
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const activeList = sessionManager.listSessions({ includeArchived: false });
+      if (activeList.length > 0) {
+        targetSessionId = activeList[0].id;
+      } else {
+        const newSession = sessionManager.createSession('New Conversation', 'General');
+        targetSessionId = newSession.id;
+      }
+    }
+
+    // Persist user message IMMEDIATELY to session before calling provider
+    const userMsg = sessionManager.addMessage(
+      targetSessionId,
+      'user',
+      userMessage,
+      { status: 'delivered', pending: true }
+    );
+
     const isConversational = config.mode === 'conversational' || config.mode === 'chat';
     if (isConversational) {
       config.toolsEnabled = false;
@@ -170,7 +190,7 @@ export class AgentCore {
       userMessage,
       this.conversationHistory,
       config,
-      sessionId
+      targetSessionId
     );
 
     let fullResponse = '';
@@ -184,35 +204,64 @@ export class AgentCore {
       ? []
       : selectRelevantTools(userMessage, allDefs, config.modelProvider);
 
-    const res = await this.providerManager.generateResponseStream(
-      messages,
-      streamToolDefs,
-      config,
-      chunkCollector,
-      signal
-    );
+    let res: { response: AgentMessage; providerUsed: string };
+    try {
+      res = await this.providerManager.generateResponseStream(
+        messages,
+        streamToolDefs,
+        config,
+        chunkCollector,
+        signal
+      );
+    } catch (err: any) {
+      const partial = fullResponse.trim();
+      const content = partial || 'Answer interrupted, no reply produced.';
+      sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
+      sessionManager.addMessage(targetSessionId, 'assistant', content, {
+        status: 'error',
+        interrupted: true,
+        modelUsed: 'interrupted_stream'
+      });
+      throw err;
+    }
+
+    if (signal?.aborted) {
+      const partial = fullResponse.trim();
+      const content = partial || 'Answer interrupted, no reply produced.';
+      sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
+      sessionManager.addMessage(targetSessionId, 'assistant', content, {
+        status: 'error',
+        interrupted: true,
+        modelUsed: 'interrupted_stream'
+      });
+      return {
+        response: content,
+        modelUsed: res.providerUsed || 'interrupted',
+        sessionId: targetSessionId
+      };
+    }
 
     const finalResponse = (fullResponse.trim() || res.response.content || "I'm right here with you.").trim();
     if (!fullResponse.trim() && finalResponse) {
       onChunk(finalResponse);
     }
 
-    // Update conversation history
-    this.conversationHistory.push({ role: 'user', content: userMessage });
-    this.conversationHistory.push({ role: 'assistant', content: finalResponse });
-    if (this.conversationHistory.length > 20) {
-      this.conversationHistory = this.conversationHistory.slice(-20);
-    }
+    // Success path: update pending turn, persist assistant message
+    sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
+    sessionManager.addMessage(targetSessionId, 'assistant', finalResponse, {
+      status: 'delivered',
+      modelUsed: res.providerUsed
+    });
 
-    this.contextManager.saveTurn(userMessage, finalResponse, sessionId);
+    this.memoryStore.addHistoryTurn('user', userMessage);
+    this.memoryStore.addHistoryTurn('assistant', finalResponse);
 
-    if (sessionId) {
-      this.maybeTriggerSummarization(sessionId);
-    }
+    this.maybeTriggerSummarization(targetSessionId);
 
     return {
       response: finalResponse,
-      modelUsed: res.providerUsed
+      modelUsed: res.providerUsed,
+      sessionId: targetSessionId
     };
   }
 
@@ -221,6 +270,26 @@ export class AgentCore {
     config: AgentConfig = {},
     sessionId?: string
   ): Promise<AgentChatResponse> {
+    const sessionManager = this.contextManager.getSessionManager();
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      const activeList = sessionManager.listSessions({ includeArchived: false });
+      if (activeList.length > 0) {
+        targetSessionId = activeList[0].id;
+      } else {
+        const newSession = sessionManager.createSession('New Conversation', 'General');
+        targetSessionId = newSession.id;
+      }
+    }
+
+    // Persist user message IMMEDIATELY to session before calling provider
+    const userMsg = sessionManager.addMessage(
+      targetSessionId,
+      'user',
+      userMessage,
+      { status: 'delivered', pending: true }
+    );
+
     const isChatMode = config.mode === 'chat' || config.mode === 'conversational';
     const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 3);
     if (isChatMode) {
@@ -232,12 +301,14 @@ export class AgentCore {
       const cleanUser = userMessage.toLowerCase().replace(/[^a-z0-9]/g, '');
       const cleanAssistant = lastAssistant.content.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (cleanUser === cleanAssistant || (cleanAssistant.length > 25 && cleanAssistant.includes(cleanUser) && cleanUser.length > 20)) {
+        sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
         return {
           response: "I'm right here listening whenever you're ready.",
           status: 'speaking',
           toolsExecuted: [],
           modelUsed: 'echo_guard',
-          memoriesRecalled: []
+          memoriesRecalled: [],
+          sessionId: targetSessionId
         };
       }
     }
@@ -250,7 +321,7 @@ export class AgentCore {
       userMessage,
       this.conversationHistory,
       config,
-      sessionId
+      targetSessionId
     );
 
     let iteration = 0;
@@ -258,99 +329,111 @@ export class AgentCore {
     let pendingConfirmation: PendingConfirmation | null = null;
     let lastProviderUsed = 'unknown';
 
-    while (iteration < maxIterations) {
-      iteration++;
+    try {
+      while (iteration < maxIterations) {
+        iteration++;
 
-      const allDefs = this.toolRegistry.getAllDefinitions();
-      let toolDefs = (config.toolsEnabled === false || isChatMode)
-        ? []
-        : selectRelevantTools(userMessage, allDefs, config.modelProvider);
+        const allDefs = this.toolRegistry.getAllDefinitions();
+        let toolDefs = (config.toolsEnabled === false || isChatMode)
+          ? []
+          : selectRelevantTools(userMessage, allDefs, config.modelProvider);
 
-      if (iteration > 1 && toolsExecuted.length > 0) {
-        toolDefs = [];
-      }
+        if (iteration > 1 && toolsExecuted.length > 0) {
+          toolDefs = [];
+        }
 
-      const { response: providerRes, providerUsed } = await this.providerManager.generateResponse(
-        messages,
-        toolDefs,
-        config
-      );
-      lastProviderUsed = providerUsed;
+        const { response: providerRes, providerUsed } = await this.providerManager.generateResponse(
+          messages,
+          toolDefs,
+          config
+        );
+        lastProviderUsed = providerUsed;
 
-      if (providerRes.toolCalls && providerRes.toolCalls.length > 0) {
-        for (const tc of providerRes.toolCalls) {
-          const toolDef = this.toolRegistry.getTool(tc.name)?.definition;
+        if (providerRes.toolCalls && providerRes.toolCalls.length > 0) {
+          for (const tc of providerRes.toolCalls) {
+            const toolDef = this.toolRegistry.getTool(tc.name)?.definition;
 
-          if (toolDef && this.permissionManager.requiresConfirmation(toolDef)) {
-            pendingConfirmation = this.permissionManager.createPendingConfirmation(tc.name, tc.arguments);
-            return {
-              response: `This action requires your confirmation: ${toolDef.description}. Would you like me to proceed with ${tc.name}?`,
-              status: 'awaiting_confirmation',
-              pendingConfirmation,
-              modelUsed: lastProviderUsed,
-              memoriesRecalled
-            };
+            if (toolDef && this.permissionManager.requiresConfirmation(toolDef)) {
+              pendingConfirmation = this.permissionManager.createPendingConfirmation(tc.name, tc.arguments);
+              sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
+              return {
+                response: `This action requires your confirmation: ${toolDef.description}. Would you like me to proceed with ${tc.name}?`,
+                status: 'awaiting_confirmation',
+                pendingConfirmation,
+                modelUsed: lastProviderUsed,
+                memoriesRecalled,
+                sessionId: targetSessionId
+              };
+            }
+
+            const result = await this.toolRegistry.execute(tc.name, tc.arguments);
+            toolsExecuted.push({
+              name: tc.name,
+              parameters: tc.arguments,
+              result
+            });
+
+            messages.push({
+              role: 'assistant',
+              content: providerRes.content || '',
+              toolCalls: [tc]
+            });
+
+            messages.push({
+              role: 'tool',
+              content: JSON.stringify(result.data || result.message),
+              toolCallId: tc.id,
+              toolResult: result
+            });
           }
 
-          const result = await this.toolRegistry.execute(tc.name, tc.arguments);
-          toolsExecuted.push({
-            name: tc.name,
-            parameters: tc.arguments,
-            result
-          });
+          if (providerUsed === 'local_fallback' || isChatMode) {
+            finalContent = synthesizeToolResults(toolsExecuted);
+            break;
+          }
 
-          messages.push({
-            role: 'assistant',
-            content: providerRes.content || '',
-            toolCalls: [tc]
-          });
-
-          messages.push({
-            role: 'tool',
-            content: JSON.stringify(result.data || result.message),
-            toolCallId: tc.id,
-            toolResult: result
-          });
-        }
-
-        if (providerUsed === 'local_fallback' || isChatMode) {
-          finalContent = synthesizeToolResults(toolsExecuted);
+          if (iteration >= maxIterations) {
+            finalContent = synthesizeToolResults(toolsExecuted);
+            break;
+          }
+        } else {
+          finalContent = providerRes.content;
           break;
         }
-
-        if (iteration >= maxIterations) {
-          finalContent = synthesizeToolResults(toolsExecuted);
-          break;
-        }
-      } else {
-        finalContent = providerRes.content;
-        break;
       }
+
+      if (!finalContent) {
+        finalContent = synthesizeToolResults(toolsExecuted);
+      }
+    } catch (err: any) {
+      sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
+      sessionManager.addMessage(targetSessionId, 'assistant', 'Answer interrupted, no reply produced.', {
+        status: 'error',
+        interrupted: true,
+        modelUsed: 'error_handler'
+      });
+      throw err;
     }
 
-    if (!finalContent) {
-      finalContent = synthesizeToolResults(toolsExecuted);
-    }
+    // Success path: update pending turn, persist assistant message
+    sessionManager.updateMessage(targetSessionId, userMsg.id, { pending: false, status: 'delivered' });
+    sessionManager.addMessage(targetSessionId, 'assistant', finalContent, {
+      status: 'delivered',
+      modelUsed: lastProviderUsed
+    });
 
-    // Update conversation history
-    this.conversationHistory.push({ role: 'user', content: userMessage });
-    this.conversationHistory.push({ role: 'assistant', content: finalContent });
-    if (this.conversationHistory.length > 20) {
-      this.conversationHistory = this.conversationHistory.slice(-20);
-    }
+    this.memoryStore.addHistoryTurn('user', userMessage);
+    this.memoryStore.addHistoryTurn('assistant', finalContent);
 
-    this.contextManager.saveTurn(userMessage, finalContent, sessionId);
-
-    if (sessionId) {
-      this.maybeTriggerSummarization(sessionId);
-    }
+    this.maybeTriggerSummarization(targetSessionId);
 
     return {
       response: finalContent,
       status: 'speaking',
       toolsExecuted,
       modelUsed: lastProviderUsed,
-      memoriesRecalled
+      memoriesRecalled,
+      sessionId: targetSessionId
     };
   }
 
@@ -423,7 +506,7 @@ export class AgentCore {
         ? factsMatch[1].split(/\n/).map(l => l.replace(/^[-*•]\s*/, '').trim()).filter(Boolean)
         : [];
 
-      if (summary) {
+      if (summary && summary.trim().length > 10) {
         sessionManager.updateRollingSummary(sessionId, summary, facts, topic);
       }
     } catch (err) {

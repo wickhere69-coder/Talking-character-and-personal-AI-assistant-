@@ -7,9 +7,11 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: number;
-  status: 'sent' | 'delivered' | 'streaming' | 'error';
+  status: 'sent' | 'delivered' | 'streaming' | 'error' | 'pending' | 'failed';
   modelUsed?: string;
   audioDurationMs?: number;
+  interrupted?: boolean;
+  pending?: boolean;
   attachment?: {
     name: string;
     type: string;
@@ -363,14 +365,16 @@ export class SessionManager {
 
     const now = Date.now();
     const msg: ChatMessage = {
-      id: `msg_${now}_${Math.random().toString(36).substring(2, 7)}`,
+      id: extra.id || `msg_${now}_${Math.random().toString(36).substring(2, 7)}`,
       sessionId,
       role,
       content,
-      createdAt: now,
+      createdAt: extra.createdAt || now,
       status: extra.status || 'delivered',
       modelUsed: extra.modelUsed,
       audioDurationMs: extra.audioDurationMs,
+      interrupted: extra.interrupted,
+      pending: extra.pending,
       attachment: extra.attachment
     };
 
@@ -389,6 +393,25 @@ export class SessionManager {
       this.autoGenerateInitialTitleAndTopic(session, content);
     }
 
+    this.save();
+    return msg;
+  }
+
+  public updateMessage(
+    sessionId: string,
+    messageId: string,
+    updates: Partial<ChatMessage>
+  ): ChatMessage | null {
+    const list = this.data.messages[sessionId];
+    if (!list) return null;
+    const msg = list.find(m => m.id === messageId);
+    if (!msg) return null;
+
+    Object.assign(msg, updates);
+    const session = this.data.sessions.find(s => s.id === sessionId);
+    if (session) {
+      session.updatedAt = Date.now();
+    }
     this.save();
     return msg;
   }

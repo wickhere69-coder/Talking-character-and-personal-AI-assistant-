@@ -9,6 +9,8 @@ import {
   triggerSessionSummarize
 } from '@/services/sessionService';
 
+const ACTIVE_SESSION_STORAGE_KEY = 'talking_character_active_session_id';
+
 interface SessionStoreState {
   sessions: ChatSession[];
   activeSessionId: string | null;
@@ -59,12 +61,24 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       const list = await fetchSessions(true);
       set({ sessions: list });
 
-      // If no active session, select the first unarchived session or create one
       const state = get();
-      if (!state.activeSessionId || !list.some(s => s.id === state.activeSessionId)) {
-        const firstActive = list.find(s => !s.archived) || list[0];
-        if (firstActive) {
-          await state.selectSession(firstActive.id);
+      const savedSessionId = typeof window !== 'undefined'
+        ? localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY)
+        : null;
+
+      // 1. Check if the saved session still exists and is not archived
+      const validSaved = savedSessionId ? list.find(s => s.id === savedSessionId && !s.archived) : null;
+
+      if (validSaved) {
+        await state.selectSession(validSaved.id);
+      } else if (!state.activeSessionId || !list.some(s => s.id === state.activeSessionId && !s.archived)) {
+        // 2. Fall back to the most recently updated unarchived session
+        const unarchived = list.filter(s => !s.archived).sort((a, b) => b.updatedAt - a.updatedAt);
+        const mostRecent = unarchived[0];
+        if (mostRecent) {
+          await state.selectSession(mostRecent.id);
+        } else if (list.length > 0) {
+          await state.selectSession(list[0].id);
         } else {
           const fresh = await state.createNewSession('New Conversation', 'General');
           await state.selectSession(fresh.id);
@@ -81,6 +95,15 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   selectSession: async (id: string) => {
     const currentActive = get().activeSessionId;
     if (currentActive === id && get().activeMessages.length > 0) return;
+
+    // Immediately persist active session ID to localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, id);
+      } catch (e) {
+        console.warn('[SessionStore] Failed to write activeSessionId to localStorage', e);
+      }
+    }
 
     // Immediately stop any existing speaking or voice playback from the old session
     window.dispatchEvent(new CustomEvent('session-switch', { detail: { newSessionId: id, oldSessionId: currentActive } }));
@@ -216,8 +239,13 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         deletingSession: null
       });
 
-      // If we just deleted the active session, pick the next available
+      // If we just deleted the active session, clear localStorage and pick next
       if (get().activeSessionId === id) {
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+          } catch {}
+        }
         const next = remaining.find(s => !s.archived) || remaining[0];
         if (next) {
           await get().selectSession(next.id);
@@ -241,21 +269,24 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
   appendLocalMessage: (message: ChatMessage) => {
     set((state) => {
-      const existing = state.activeMessages.some(m => m.id === message.id);
-      if (existing) {
-        return {
-          activeMessages: state.activeMessages.map(m => m.id === message.id ? message : m)
-        };
-      }
-      const updated = [...state.activeMessages, message];
-      // Also update message count on the session
-      const updatedSessions = state.sessions.map(s =>
-        s.id === message.sessionId
-          ? { ...s, messageCount: updated.length, updatedAt: message.createdAt }
-          : s
-      );
+      const isForActive = state.activeSessionId === message.sessionId;
+      const updatedActiveMessages = isForActive
+        ? (state.activeMessages.some(m => m.id === message.id)
+            ? state.activeMessages.map(m => m.id === message.id ? message : m)
+            : [...state.activeMessages, message])
+        : state.activeMessages;
+
+      // Update message count and updatedAt on the target session in sessions list
+      const updatedSessions = state.sessions.map(s => {
+        if (s.id === message.sessionId) {
+          const nextCount = isForActive ? updatedActiveMessages.length : (s.messageCount + 1);
+          return { ...s, messageCount: nextCount, updatedAt: message.createdAt };
+        }
+        return s;
+      });
+
       return {
-        activeMessages: updated,
+        activeMessages: updatedActiveMessages,
         sessions: updatedSessions
       };
     });

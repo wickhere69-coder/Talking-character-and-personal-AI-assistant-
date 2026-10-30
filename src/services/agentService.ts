@@ -1,6 +1,7 @@
 export interface AgentChatResponse {
   response: string;
   status: 'idle' | 'listening' | 'thinking' | 'executing_tool' | 'speaking' | 'error' | 'awaiting_confirmation';
+  sessionId?: string;
   toolsExecuted?: Array<{
     name: string;
     parameters: Record<string, any>;
@@ -45,7 +46,7 @@ export async function streamAgentConversation(
   callbacks: {
     onSentence?: (sentence: string) => void;
     onChunk?: (chunk: string) => void;
-    onComplete?: (fullResponse: string, modelUsed: string) => void;
+    onComplete?: (fullResponse: string, modelUsed: string, sessionId?: string) => void;
     onError?: (error: Error) => void;
   },
   signal?: AbortSignal,
@@ -80,6 +81,7 @@ export async function streamAgentConversation(
     let sentenceBuffer = '';
     let accumulatedResponse = '';
     let modelUsed = 'unknown';
+    let responseSessionId: string | undefined = sessionId;
     let sseLineBuffer = '';
     let dispatchedSentenceCount = 0;
 
@@ -143,6 +145,9 @@ export async function streamAgentConversation(
             if (parsed.modelUsed) {
               modelUsed = parsed.modelUsed;
             }
+            if (parsed.sessionId) {
+              responseSessionId = parsed.sessionId;
+            }
           }
         } catch (parseErr: any) {
           // Ignore JSON parse errors for SSE heartbeat or partial frames
@@ -159,7 +164,7 @@ export async function streamAgentConversation(
       dispatchSentence(accumulatedResponse.trim());
     }
 
-    callbacks.onComplete?.(accumulatedResponse.trim(), modelUsed);
+    callbacks.onComplete?.(accumulatedResponse.trim(), modelUsed, responseSessionId);
   } catch (err: any) {
     if (signal?.aborted || err.name === 'AbortError') {
       // Intentional abort (e.g. user barged in and interrupted)
