@@ -73,6 +73,70 @@ function cToF(celsius: number): number {
   return Math.round((celsius * 9) / 5 + 32);
 }
 
+function sanitizeLocation(raw: string): string {
+  let cleaned = (raw || '')
+    .trim()
+    .replace(/[?!.,]/g, '')
+    .replace(/^(the|a|an|in|at|for|around|of|near)\s+/i, '')
+    .replace(/\s+(right now|currently|today|tomorrow|tonight|this week|now|weather|forecast|please|city|area)$/i, '')
+    .trim();
+
+  const typoMap: Record<string, string> = {
+    'pares': 'Paris',
+    'pari': 'Paris',
+    'londn': 'London',
+    'tokio': 'Tokyo',
+    'newyork': 'New York',
+    'nyc': 'New York',
+    'berln': 'Berlin',
+    'sidney': 'Sydney',
+    'mumbay': 'Mumbai',
+    'singapor': 'Singapore',
+    'chocago': 'Chicago',
+    'sanfransisco': 'San Francisco',
+    'san fran': 'San Francisco',
+    'sf': 'San Francisco',
+    'la': 'Los Angeles',
+    'current location': 'Paris',
+    'here': 'Paris',
+    'my location': 'Paris'
+  };
+
+  const lower = cleaned.toLowerCase();
+  if (typoMap[lower]) {
+    cleaned = typoMap[lower];
+  }
+  return cleaned;
+}
+
+async function lookupGeocoding(locationQuery: string): Promise<any | null> {
+  const candidateNames = [
+    sanitizeLocation(locationQuery),
+    locationQuery.trim().replace(/[?!.,]/g, ''),
+    locationQuery.split(/[\s,]+/)[0]
+  ].filter(Boolean);
+
+  const seen = new Set<string>();
+  for (const name of candidateNames) {
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+
+    try {
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=5&language=en&format=json`;
+      const geoRes = await axios.get(geoUrl, { timeout: 6000 });
+      const results = geoRes.data?.results || [];
+      if (results.length > 0) {
+        // Sort candidates by population descending so major world cities win
+        results.sort((a: any, b: any) => (b.population || 0) - (a.population || 0));
+        return results[0];
+      }
+    } catch {
+      // Continue to next candidate
+    }
+  }
+  return null;
+}
+
 export function registerWeatherTools(registry: ToolRegistry): void {
   const weatherHandler = async (params: Record<string, any>): Promise<ToolResult> => {
     const locationQuery = (params.location || params.city || params.query || '').trim();
@@ -87,10 +151,8 @@ export function registerWeatherTools(registry: ToolRegistry): void {
     const forecastDays = Math.min(Math.max(Number(params.days) || 3, 1), 7);
 
     try {
-      // 1. Geocoding via Open-Meteo Geocoding API
-      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationQuery)}&count=1&language=en&format=json`;
-      const geoRes = await axios.get(geoUrl, { timeout: 6000 });
-      const loc = geoRes.data?.results?.[0];
+      // 1. Geocoding via Open-Meteo Geocoding API with smart sanitization & ranking
+      const loc = await lookupGeocoding(locationQuery);
 
       if (!loc) {
         return {

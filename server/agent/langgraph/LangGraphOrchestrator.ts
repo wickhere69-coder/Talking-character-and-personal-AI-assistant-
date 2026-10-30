@@ -508,8 +508,17 @@ function inferToolArgs(userMessage: string, toolName: string): Record<string, an
       return { query: userMessage };
     case 'predict_weather':
     case 'get_weather': {
-      const cityMatch = userMessage.match(/in\s+([A-Za-z\s]+?)(?:\?|$|,)/i);
-      return { location: cityMatch?.[1]?.trim() || 'current location' };
+      let loc = '';
+      const inMatch = userMessage.match(/\b(?:in|for|at|around|of)\s+([A-Za-z\s.-]+?)(?:\s+(?:today|tomorrow|tonight|this week|now|right now|please)|\?|$|,)/i);
+      if (inMatch && inMatch[1].trim()) {
+        loc = inMatch[1].trim();
+      } else {
+        const weatherMatch = userMessage.match(/\b([A-Za-z\s.-]+?)\s+(?:weather|forecast|temperature)\b/i);
+        if (weatherMatch && weatherMatch[1].trim()) {
+          loc = weatherMatch[1].trim().replace(/^(what is|whats|what's|how is|how's|hows|tell me|the)\s+/i, '').trim();
+        }
+      }
+      return { location: loc || 'Paris' };
     }
     case 'add_task': {
       const taskMatch = userMessage.match(/(?:add task|create task|remind me to|task:?)\s*(?::\s*)?(.+)/i);

@@ -61,8 +61,8 @@ class VoicePlaybackManager {
     if (this.audioElement) {
       this.audioElement.onended = () => {
         if (this.activeChannel === 'audio') {
-          // Seamless transition: only reset speaking and playback state if no more queued sentences exist
-          const hasMoreSentences = this.isQueueMode && this.sentenceQueue.length > 0;
+          // Seamless transition: only reset speaking and playback state if conversational queue is truly done
+          const hasMoreSentences = this.isQueueMode && (this.sentenceQueue.length > 0 || this.isStreamActive || this.isProcessingQueue);
           if (!hasMoreSentences) {
             this.activeChannel = null;
             const state = useAppStore.getState();
@@ -248,6 +248,15 @@ class VoicePlaybackManager {
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         this.activeBlobUrls.push(blobUrl);
+
+        // Pre-warm the audio decoder so playback begins instantly with zero delay
+        try {
+          const prewarmer = new Audio();
+          prewarmer.preload = 'auto';
+          prewarmer.src = blobUrl;
+          prewarmer.load();
+        } catch {}
+
         return blobUrl;
       }
       return null;
@@ -309,6 +318,14 @@ class VoicePlaybackManager {
     this.isStreamActive = false;
     if (this.sentenceQueue.length === 0 && !this.isProcessingQueue) {
       this.isQueueMode = false;
+      this.activeChannel = null;
+      const state = useAppStore.getState();
+      state.setPlaybackState('idle');
+      state.setIsSpeaking(false);
+      state.setCurrentWordIndex(-1);
+      if (state.agentStatus === 'speaking') {
+        state.setAgentStatus('idle');
+      }
       if (this.onQueueEmptyCallback) {
         const cb = this.onQueueEmptyCallback;
         this.onQueueEmptyCallback = null;
@@ -320,12 +337,22 @@ class VoicePlaybackManager {
   private async processNextSentence(): Promise<void> {
     if (this.sentenceQueue.length === 0) {
       this.isProcessingQueue = false;
-      // Only complete the turn if the LLM stream is finished
-      if (!this.isStreamActive && this.onQueueEmptyCallback) {
-        const cb = this.onQueueEmptyCallback;
-        this.onQueueEmptyCallback = null;
+      // Only complete the turn if the LLM stream is completely finished
+      if (!this.isStreamActive) {
         this.isQueueMode = false;
-        cb();
+        this.activeChannel = null;
+        const state = useAppStore.getState();
+        state.setPlaybackState('idle');
+        state.setIsSpeaking(false);
+        state.setCurrentWordIndex(-1);
+        if (state.agentStatus === 'speaking') {
+          state.setAgentStatus('idle');
+        }
+        if (this.onQueueEmptyCallback) {
+          const cb = this.onQueueEmptyCallback;
+          this.onQueueEmptyCallback = null;
+          cb();
+        }
       }
       return;
     }
@@ -334,13 +361,10 @@ class VoicePlaybackManager {
     const currentQueueSession = this.queueSessionId;
     const nextItem = this.sentenceQueue.shift()!;
 
-    // Resolve pre-fetched audio URL if ready, or wait up to 450ms for in-flight download to finish
+    // Resolve pre-fetched audio URL directly
     let preloadedUrl = nextItem.blobUrl;
     if (!preloadedUrl && nextItem.blobUrlPromise) {
-      preloadedUrl = (await Promise.race([
-        nextItem.blobUrlPromise,
-        new Promise<null>((r) => setTimeout(() => r(null), 450))
-      ])) || undefined;
+      preloadedUrl = (await nextItem.blobUrlPromise) || undefined;
     }
 
     await this.speakSentence(nextItem.text, () => {
@@ -369,18 +393,19 @@ class VoicePlaybackManager {
     this.currentSentenceEndCallback = onEnded || null;
 
     const store = useAppStore.getState();
-    store.setSpeechText(trimmed);
-    store.setPlaybackState('loading');
-    store.setError(null);
+    if (!this.isQueueMode) {
+      store.setPlaybackState('loading');
+      store.setError(null);
+    }
 
     const voice = this.resolveCurrentVoice();
     if (preloadedUrl) {
       this.activeChannel = 'audio';
       store.setVisemeQueue([]);
       store.setAudioUrl(preloadedUrl);
-      await this.playAudioWithSync(preloadedUrl, sessionId);
+      await this.playAudioWithSync(preloadedUrl, sessionId, trimmed);
     } else {
-      await this.playWithElevenLabs(trimmed, voice, undefined, sessionId);
+      await this.playWithElevenLabs(trimmed, voice, undefined, sessionId, trimmed);
     }
   }
 
@@ -411,14 +436,15 @@ class VoicePlaybackManager {
     const sessionId = this.currentSessionId;
 
     const store = useAppStore.getState();
-    store.setSpeechText(text);
-    store.setPlaybackState('loading');
-    store.setError(null);
+    if (!this.isQueueMode) {
+      store.setPlaybackState('loading');
+      store.setError(null);
+    }
 
     // Resolve voice: strictly ElevenLabs voice
     const voice: VoiceOption = activeVoice || this.resolveCurrentVoice();
 
-    await this.playWithElevenLabs(text, voice, elevenLabsApiKey, sessionId);
+    await this.playWithElevenLabs(text, voice, elevenLabsApiKey, sessionId, text);
   }
 
   /**
@@ -428,7 +454,7 @@ class VoicePlaybackManager {
    * 3. Sets playbackState = 'playing' and isSpeaking = true ONLY when audio actually emits sound.
    * 4. Handles abort, errors, and session cancellations cleanly.
    */
-  private playAudioWithSync(url: string, sessionId: number): Promise<void> {
+  private playAudioWithSync(url: string, sessionId: number, textToDisplay?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const audio = this.audioElement || (typeof document !== 'undefined' ? (document.getElementById('tts-audio') as HTMLAudioElement | null) : null);
       if (!audio) {
@@ -440,8 +466,10 @@ class VoicePlaybackManager {
       }
 
       const store = useAppStore.getState();
-      store.setPlaybackState('loading');
-      store.setIsSpeaking(false);
+      if (!this.isQueueMode) {
+        store.setPlaybackState('loading');
+        store.setIsSpeaking(false);
+      }
 
       let settled = false;
 
@@ -452,6 +480,11 @@ class VoicePlaybackManager {
         if (sessionId === this.currentSessionId) {
           store.setPlaybackState('playing');
           store.setIsSpeaking(true);
+          if (textToDisplay) {
+            store.setSpeechText(textToDisplay);
+            store.setCurrentSentence(textToDisplay);
+            store.setCurrentWordIndex(0);
+          }
         }
         resolve();
       };
@@ -493,9 +526,6 @@ class VoicePlaybackManager {
       if (audio.src !== url) {
         audio.src = url;
       }
-      try {
-        if (audio.currentTime !== 0) audio.currentTime = 0;
-      } catch {}
 
       audio.play().then(() => {
         // Fallback if 'playing' event already fired or audio is advancing
@@ -520,7 +550,8 @@ class VoicePlaybackManager {
     text: string,
     voice: VoiceOption,
     sessionId: number,
-    preloadedUrl?: string
+    preloadedUrl?: string,
+    textToDisplay?: string
   ): Promise<void> {
     try {
       const streamUrl = preloadedUrl || `/api/tts-stream?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}&s=${sessionId}`;
@@ -535,7 +566,7 @@ class VoicePlaybackManager {
       store.setVisemeQueue([]);
       store.setAudioUrl(streamUrl);
 
-      await this.playAudioWithSync(streamUrl, sessionId);
+      await this.playAudioWithSync(streamUrl, sessionId, textToDisplay || text);
     } catch (err: any) {
       if (sessionId !== this.currentSessionId) return;
 
@@ -560,7 +591,8 @@ class VoicePlaybackManager {
     text: string,
     voice: VoiceOption,
     apiKey: string | undefined,
-    sessionId: number
+    sessionId: number,
+    textToDisplay?: string
   ): Promise<void> {
     this.activeAbortController = new AbortController();
     const key = apiKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');
@@ -568,7 +600,7 @@ class VoicePlaybackManager {
     // Fast-path: Valid ElevenLabs API keys always start with 'sk_'.
     // If key is missing or not a valid sk_ key, skip directly to ultra-fast Studio Neural Edge TTS.
     if (!key || !key.startsWith('sk_')) {
-      await this.playWithAzure(text, voice, sessionId);
+      await this.playWithAzure(text, voice, sessionId, undefined, textToDisplay || text);
       return;
     }
 
@@ -586,7 +618,7 @@ class VoicePlaybackManager {
         store.setVisemeQueue(res.visemes || []);
         store.setAudioUrl(res.audioUrl);
 
-        await this.playAudioWithSync(res.audioUrl, sessionId);
+        await this.playAudioWithSync(res.audioUrl, sessionId, textToDisplay || text);
       } else {
         throw new Error('No audio returned from synthesis');
       }
@@ -608,7 +640,7 @@ class VoicePlaybackManager {
       }
 
       // Stream high quality Studio Neural audio (Lily: British English Velvety Narrator)
-      await this.playWithAzure(text, voice, sessionId);
+      await this.playWithAzure(text, voice, sessionId, undefined, textToDisplay || text);
     } finally {
       if (sessionId === this.currentSessionId) {
         this.activeAbortController = null;

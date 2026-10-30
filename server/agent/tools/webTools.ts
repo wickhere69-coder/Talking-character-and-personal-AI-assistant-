@@ -37,35 +37,80 @@ export function registerWebTools(registry: ToolRegistry): void {
       }
 
       try {
-        // 1. Primary: Live DuckDuckGo web search using native fetch
-        let html = '';
-        try {
-          const ddgUrl = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query);
-          const ddgRes = await fetch(ddgUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            },
-            signal: AbortSignal.timeout(4500)
-          });
-          if (ddgRes.ok) {
-            html = await ddgRes.text();
-          }
-        } catch (_ddgErr) {
-          // DDG network or timeout error, will fallback to Wikipedia
-        }
-
-        const regex = /<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/g;
-        let match;
         const snippets: string[] = [];
 
-        if (html) {
-          while ((match = regex.exec(html)) !== null && snippets.length < 4) {
-            const cleaned = decodeHtml(match[1]);
-            if (cleaned.length > 20) {
-              snippets.push(cleaned);
+        // 1. Primary for news & current affairs: Google News RSS (real-time 2026 reporting in ~500ms)
+        const isNews = /\b(news|today|latest|current|recent|election|war|game|super bowl|score|winner|championship|president|minister|stock|price|what happened|who won)\b/i.test(query);
+        if (isNews) {
+          try {
+            const newsUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(query) + '&hl=en-US&gl=US&ceid=US:en';
+            const newsRes = await axios.get(newsUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              timeout: 3000
+            });
+            const xml = newsRes.data || '';
+            const itemRegex = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g;
+            let itemMatch;
+            while ((itemMatch = itemRegex.exec(xml)) !== null && snippets.length < 4) {
+              const title = decodeHtml(itemMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim());
+              const pubDate = itemMatch[2].trim();
+              if (title && !title.toLowerCase().startsWith('google news')) {
+                snippets.push(`${title} (Reported: ${pubDate})`);
+              }
             }
-          }
+          } catch {}
+        }
+
+        // 2. DuckDuckGo HTML web search
+        if (snippets.length < 3) {
+          try {
+            const ddgUrl = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query);
+            const ddgRes = await fetch(ddgUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+              },
+              signal: AbortSignal.timeout(3000)
+            });
+            if (ddgRes.ok) {
+              const html = await ddgRes.text();
+              const regex = /<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/g;
+              let match;
+              while ((match = regex.exec(html)) !== null && snippets.length < 4) {
+                const cleaned = decodeHtml(match[1]);
+                if (cleaned.length > 20) {
+                  snippets.push(cleaned);
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // 3. DuckDuckGo Instant Answer API
+        if (snippets.length < 2) {
+          try {
+            const apiRes = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`, {
+              timeout: 2500
+            });
+            if (apiRes.data?.AbstractText) {
+              snippets.push(apiRes.data.AbstractText);
+            }
+          } catch {}
+        }
+
+        // 4. Secondary fallback: Wikipedia API
+        if (snippets.length === 0) {
+          try {
+            const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
+              headers: { 'User-Agent': 'StudioPersonalAssistant/1.0 (personal.agent@local)' },
+              params: { action: 'query', list: 'search', srsearch: query, format: 'json', utf8: 1, srlimit: 3 },
+              timeout: 2500
+            });
+            const items = wikiRes.data?.query?.search || [];
+            if (items.length > 0) {
+              items.forEach((i: any) => snippets.push(`${i.title}: ${decodeHtml(i.snippet)}`));
+            }
+          } catch {}
         }
 
         if (snippets.length > 0) {
@@ -73,33 +118,7 @@ export function registerWebTools(registry: ToolRegistry): void {
           return {
             success: true,
             data: snippets,
-            message: `Real-time search results for "${query}":\n${formatted}`
-          };
-        }
-
-        // 2. Secondary fallback: Wikipedia API
-        const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
-          headers: {
-            'User-Agent': 'StudioPersonalAssistant/1.0 (https://local.assistant; personal.agent@local)'
-          },
-          params: {
-            action: 'query',
-            list: 'search',
-            srsearch: query,
-            format: 'json',
-            utf8: 1,
-            srlimit: 3
-          },
-          timeout: 3000
-        });
-
-        const items = wikiRes.data?.query?.search || [];
-        if (items.length > 0) {
-          const wikiSnippets = items.map((i: any) => `${i.title}: ${decodeHtml(i.snippet)}`);
-          return {
-            success: true,
-            data: wikiSnippets,
-            message: `Wikipedia results for "${query}":\n${wikiSnippets.join('\n')}`
+            message: `Real-time live search results for "${query}":\n${formatted}`
           };
         }
 

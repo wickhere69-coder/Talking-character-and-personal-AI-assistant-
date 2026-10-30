@@ -16,7 +16,7 @@ export default function FullResponseModal() {
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A2C33] bg-[#181818]">
           <div className="flex items-center gap-2.5">
-            <FileText size={16} strokeWidth={1.5} className="text-[#6E8BFF]" />
+            <FileText size={16} strokeWidth={1.5} className="text-[#A78BFA]" />
             <h2 className={TYPO.title}>
               Full AI Assistant Response
             </h2>
@@ -31,7 +31,7 @@ export default function FullResponseModal() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[#181818]">
+        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[#0D0F17]">
           <div className="text-[13px] text-[#F2F2F2]/90 leading-relaxed select-text whitespace-pre-wrap font-sans">
             {lastFullResponse}
           </div>

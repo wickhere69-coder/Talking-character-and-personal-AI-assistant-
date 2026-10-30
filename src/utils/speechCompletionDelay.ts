@@ -19,7 +19,7 @@ export function getSpeechCompletionDelay(
   }
 
   const text = transcript.trim().toLowerCase();
-  if (!text) return 700;
+  if (!text) return 1200;
 
   const words = text.split(/\s+/).filter(Boolean);
   const lastWord = words[words.length - 1]?.replace(/[^a-z0-9']/g, '') || '';
@@ -27,7 +27,21 @@ export function getSpeechCompletionDelay(
   const endsWithIncompleteWord = INCOMPLETE_TRAILING_WORDS.has(lastWord);
   const endsWithTerminalPunctuation = /[.?!]$/.test(transcript.trim());
 
-  if (endsWithIncompleteWord) return 900;
-  if (endsWithTerminalPunctuation) return isFinal ? 300 : 450;
-  return isFinal ? 400 : 550;
+  // 1. Incomplete connector or filler word (user is pausing to think mid-sentence)
+  if (endsWithIncompleteWord) {
+    return 1800;
+  }
+
+  // 2. Short beginning (< 4 words without punctuation, e.g. "Can you tell me")
+  if (words.length <= 4 && !endsWithTerminalPunctuation) {
+    return 1600;
+  }
+
+  // 3. Clear terminal question/period (user finished their question)
+  if (endsWithTerminalPunctuation) {
+    return isFinal ? 950 : 1300;
+  }
+
+  // 4. Standard conversational pause between sentences
+  return isFinal ? 1100 : 1500;
 }

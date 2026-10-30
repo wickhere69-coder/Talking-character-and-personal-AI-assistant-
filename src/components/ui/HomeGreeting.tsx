@@ -18,7 +18,7 @@ export default function HomeGreeting() {
         {dynamicGreeting}
       </h1>
       <p className="text-sm md:text-base text-[#A7A9AF] font-normal font-sans mt-2 tracking-normal">
-        Say <span className="text-[#6E8BFF] font-medium">"Hey Aura"</span> to start a conversation
+        Say <span className="text-[#A78BFA] font-medium">"Hey Aura"</span> to start a conversation
       </p>
     </div>
   );

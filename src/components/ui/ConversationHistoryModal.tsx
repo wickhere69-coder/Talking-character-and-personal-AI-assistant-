@@ -37,7 +37,7 @@ export default function ConversationHistoryModal() {
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A2C33] bg-[#181818]">
           <div className="flex items-center gap-2.5">
-            <MessageSquare size={16} strokeWidth={1.5} className="text-[#6E8BFF]" />
+            <MessageSquare size={16} strokeWidth={1.5} className="text-[#A78BFA]" />
             <h2 className={TYPO.title}>
               Conversation Memory & History
             </h2>
@@ -70,7 +70,7 @@ export default function ConversationHistoryModal() {
         </div>
 
         {/* Message List */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[#181818]">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[#0D0F17]">
           {loading ? (
             <div className="py-16 text-center text-[#A7A9AF]/60 text-xs font-sans">
               Loading conversation history...
@@ -99,16 +99,16 @@ export default function ConversationHistoryModal() {
                     </>
                   ) : (
                     <>
-                      <Bot size={10} strokeWidth={1.5} className="text-[#6E8BFF]" />
+                      <Bot size={10} strokeWidth={1.5} className="text-[#A78BFA]" />
                       <span>Aura AI Assistant</span>
                     </>
                   )}
                 </span>
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap font-sans ${
+                  className={`max-w-[85%] rounded-[14px] px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap font-sans ${
                     msg.role === 'user'
                       ? 'bg-[#202126] border border-[#2A2C33] text-[#F2F2F2] font-medium rounded-br-sm shadow-sm'
-                      : 'bg-[#202126] border border-[#2A2C33] border-l-2 border-l-[#6E8BFF] text-[#F2F2F2]/90 rounded-bl-sm'
+                      : 'bg-[#131622] border border-[#2A2C33] border-l-2 border-l-[#6E8BFF] text-[#F2F2F2] rounded-[14px] rounded-bl-sm'
                   }`}
                 >
                   {msg.content}

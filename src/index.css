@@ -7,16 +7,23 @@
 
   --color-app-bg: #0B0D12;
   --color-app-sidebar: #181818;
+  --color-app-panel: #0D0F17;
   --color-app-surface: #202126;
+  --color-app-card: #131622;
+  --color-app-input: #11131C;
   --color-app-border: #2A2C33;
-  --color-app-accent: #6E8BFF;
-  --color-app-glow: #314B9A;
+  --color-app-accent: #A78BFA;
+  --color-app-indicator: #6E8BFF;
   --color-app-text: #F2F2F2;
   --color-app-text-muted: #A7A9AF;
 
-  --shadow-accent-glow: 0 0 28px rgba(110, 139, 255, 0.2);
-  --shadow-card-elevated: 0 16px 40px -4px rgba(0, 0, 0, 0.8), inset 0 1px 1px 0 rgba(255, 255, 255, 0.04);
-  --shadow-mic-pulse: 0 0 24px 4px rgba(110, 139, 255, 0.35);
+  --radius-card: 14px;
+  --radius-panel: 16px;
+  --radius-pill: 9999px;
+
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-card-elevated: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --shadow-mic-pulse: 0 0 16px rgba(167, 139, 250, 0.35);
 }
 
 :root {
@@ -27,13 +34,16 @@
 
   --bg-primary: #0B0D12;
   --bg-sidebar: #181818;
+  --bg-panel: #0D0F17;
   --bg-surface: #202126;
+  --bg-card: #131622;
   --border: #2A2C33;
+  --border-subtle: rgba(255, 255, 255, 0.08);
   --border-active: #6E8BFF;
   --text-primary: #F2F2F2;
   --text-secondary: #A7A9AF;
-  --accent: #6E8BFF;
-  --accent-glow: #314B9A;
+  --accent: #A78BFA;
+  --indicator: #6E8BFF;
 }
 
 body {
@@ -96,23 +106,22 @@ body {
   100% { height: 18px; }
 }
 
-/* ── Glows & Shadows ── */
+/* ── Glows & Shadows (Subtle, Soft Human Aesthetic) ── */
 .accent-glow {
-  box-shadow: 0 0 25px rgba(110, 139, 255, 0.25), 0 0 50px rgba(110, 139, 255, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 .card-glass {
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6), inset 0 1px 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .mic-glow {
-  box-shadow: 0 0 20px 4px rgba(110, 139, 255, 0.5), 0 0 40px rgba(110, 139, 255, 0.2);
+  box-shadow: 0 0 16px rgba(167, 139, 250, 0.35);
 }
 
 .panel-glow {
   box-shadow:
-    0 0 80px rgba(110, 139, 255, 0.06),
-    0 8px 32px rgba(0, 0, 0, 0.7),
+    0 8px 32px rgba(0, 0, 0, 0.6),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -228,15 +237,15 @@ body {
 
 /* ── Text Selection ── */
 ::selection {
-  background: rgba(110, 139, 255, 0.3);
+  background: rgba(167, 139, 250, 0.25);
   color: #F2F2F2;
 }
 
 /* ── Focus Ring ── */
 :focus-visible {
-  outline: 2px solid rgba(110, 139, 255, 0.6);
+  outline: 2px solid rgba(167, 139, 250, 0.5);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 9999px;
 }
 
 /* ── Transition Defaults ── */

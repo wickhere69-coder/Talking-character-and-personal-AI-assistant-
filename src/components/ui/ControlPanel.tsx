@@ -642,21 +642,21 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
         aria-label="Studio AI Inspector & Settings Drawer"
         className={`fixed right-4 top-4 bottom-4 w-[480px] lg:w-[540px] xl:w-[580px] max-md:w-[94vw] max-md:right-[3vw] z-50 transition-all duration-300 ease-out transform-gpu pointer-events-auto ${
           isCollapsed 
-            ? 'translate-x-[460px] opacity-0 pointer-events-none' 
+            ? 'translate-x-[calc(100%+2rem)] opacity-0 pointer-events-none' 
             : 'translate-x-0 opacity-100'
         }`}
       >
         {/* ── Solid Charcoal Shell (#181818) ── */}
-        <div className="h-full bg-[#0D0F17]/92 backdrop-blur-3xl border border-white/[0.08] rounded-3xl shadow-[0_24px_80px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden">
+        <div className="h-full bg-[#0D0F17]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden">
 
           {/* ── 1. Drawer Header ── */}
-          <div className="px-5 py-4 border-b border-white/[0.07] bg-[#131622]/40 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-[#2A2C33] bg-[#181818]/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-[#202126] border border-[#2A2C33] flex items-center justify-center text-[#6E8BFF]">
+              <div className="w-8 h-8 rounded-full bg-[#202126] border border-[#2A2C33] flex items-center justify-center text-[#A78BFA]">
                 <Sparkles size={17} strokeWidth={1.75} />
               </div>
               <div>
-                <h2 className="text-sm font-semibold tracking-wide uppercase text-[#F2F2F2] font-sans">
+                <h2 className="text-[11px] font-semibold tracking-wider uppercase text-[#A7A9AF] font-mono">
                   AI STUDIO
                 </h2>
                 <p className="text-[11px] text-[#A7A9AF] font-normal tracking-normal">
@@ -666,7 +666,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#202126] border border-[#2A2C33] text-[11px] font-mono text-[#A7A9AF]">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#131622] border border-[#2A2C33] text-[11px] font-mono text-[#A7A9AF]">
                 <span className={agentHealthInfo.connected ? STATUS_DOTS.success : STATUS_DOTS.danger} />
                 <span className="tracking-wide">{agentHealthInfo.connected ? 'ONLINE' : 'OFFLINE'}</span>
               </div>
@@ -677,7 +677,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setIsCollapsed(true);
                   setStoreNavTab('home');
                 }}
-                className="w-8 h-8 rounded-full bg-[#202126] border border-[#2A2C33] flex items-center justify-center text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-[#282932] active:scale-95 transition shadow-sm"
+                className="w-8 h-8 rounded-full bg-[#131622] border border-[#2A2C33] flex items-center justify-center text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-[#202126] active:scale-95 transition shadow-sm"
                 title="Close Drawer"
               >
                 <X size={15} strokeWidth={1.75} />
@@ -686,8 +686,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           </div>
 
           {/* ── 2. Top-Level Tab Switcher ── */}
-          <div className="p-3 border-b border-white/[0.07] bg-[#131622]/20">
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#131622]/80 border border-white/[0.08] rounded-full">
+          <div className="p-3 border-b border-[#2A2C33] bg-[#0D0F17]">
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#11131C] border border-[#2A2C33] rounded-full">
               <button
                 type="button"
                 onClick={() => {
@@ -696,8 +696,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   loadHistory();
                 }}
                 className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'chat'
-                    ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold shadow-sm'
+                  activeTab === 'chat' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.08] shadow-sm'
                     : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
@@ -712,8 +711,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setStoreNavTab('voice');
                 }}
                 className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'voice'
-                    ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold shadow-sm'
+                  activeTab === 'voice' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.08] shadow-sm'
                     : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
@@ -728,8 +726,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setStoreNavTab('settings');
                 }}
                 className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'settings'
-                    ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold shadow-sm'
+                  activeTab === 'settings' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.08] shadow-sm'
                     : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
@@ -768,9 +765,9 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           {activeTab === 'voice' && (
             <div className="space-y-5">
               {/* ElevenLabs Voice Pack Banner */}
-              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#202126] border border-[#2A2C33]">
+              <div className="flex items-center justify-between p-3.5 rounded-[14px] bg-[#131622] border border-[#2A2C33]">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-[#6E8BFF]/15 border border-[#6E8BFF]/30 flex items-center justify-center text-[#6E8BFF] shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-[#A78BFA]/15 border border-[#A78BFA]/25 flex items-center justify-center text-[#A78BFA] shrink-0">
                     <Sparkles size={16} strokeWidth={1.75} />
                   </div>
                   <div className="min-w-0">
@@ -782,7 +779,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                     </p>
                   </div>
                 </div>
-                <span className="text-[10px] px-2.5 py-1 rounded-full bg-[#6E8BFF]/20 text-[#6E8BFF] font-mono uppercase font-semibold border border-[#6E8BFF]/30 tracking-wide shrink-0">
+                <span className="text-[10px] px-2.5 py-1 rounded-full bg-[#A78BFA]/15 text-[#C4B5FD] font-mono uppercase font-semibold border border-[#A78BFA]/25 tracking-wide shrink-0">
                   Active Pack
                 </span>
               </div>
@@ -795,7 +792,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   value={voiceSearchQuery}
                   onChange={(e) => setVoiceSearchQuery(e.target.value)}
                   placeholder="Search voices by name or language..."
-                  className="w-full bg-[#202126] border border-[#2A2C33] focus:border-[#6E8BFF]/60 focus:ring-1 focus:ring-[#6E8BFF]/30 rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#F2F2F2] placeholder-[#A7A9AF]/50 focus:outline-none transition font-sans"
+                  className="w-full bg-[#11131C] border border-[#2A2C33] focus:border-[#A78BFA]/50 focus:ring-1 focus:ring-[#A78BFA]/20 rounded-full pl-10 pr-4 py-2 text-xs md:text-sm text-[#F2F2F2] placeholder-[#A7A9AF] focus:outline-none transition font-sans"
                 />
               </div>
 
@@ -809,9 +806,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                       key={voice.id}
                       onClick={() => handleSelectVoice(voice.id)}
                       className={`p-3 rounded-2xl border transition-all duration-150 flex items-center justify-between cursor-pointer active:scale-[0.99] ${
-                        isSelected
-                          ? 'bg-[#202126] border-[#6E8BFF]/60 shadow-[0_0_16px_rgba(110,139,255,0.15)] ring-1 ring-[#6E8BFF]/30'
-                          : 'bg-[#181818] border border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
+                        isSelected ? 'bg-[#202126] border-[#A78BFA]/50 ring-1 ring-[#A78BFA]/20' : 'bg-[#131622] border border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
@@ -821,7 +816,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                             e.stopPropagation();
                             handleSelectVoice(voice.id);
                           }}
-                          className="w-9 h-9 rounded-full bg-[#202126] hover:bg-[#6E8BFF] text-[#A7A9AF] hover:text-[#0B0D12] flex items-center justify-center transition active:scale-90 shrink-0 border border-[#2A2C33] hover:border-transparent shadow-sm"
+                          className="w-8 h-8 rounded-full bg-[#11131C] hover:bg-[#A78BFA] text-[#A7A9AF] hover:text-[#0B0D12] flex items-center justify-center transition active:scale-90 shrink-0 border border-[#2A2C33] hover:border-transparent shadow-sm"
                           title="Select and preview voice sample"
                         >
                           <Play size={14} strokeWidth={2} />
@@ -832,7 +827,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                           </p>
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[10px] font-mono text-[#A7A9AF]">{voice.lang}</span>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#6E8BFF]/15 text-[#6E8BFF] font-mono uppercase font-semibold">
+                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-[#A78BFA]/15 text-[#C4B5FD] font-mono uppercase font-semibold">
                               ElevenLabs
                             </span>
                             {voice.description && (
@@ -845,7 +840,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                       </div>
 
                       {isSelected && (
-                        <div className="w-6 h-6 rounded-full bg-[#6E8BFF] text-[#0B0D12] flex items-center justify-center shrink-0 shadow-sm">
+                        <div className="w-5 h-5 rounded-full bg-[#A78BFA] text-[#0B0D12] flex items-center justify-center shrink-0 shadow-sm">
                           <Check size={13} strokeWidth={2.5} />
                         </div>
                       )}
@@ -855,12 +850,12 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
               </div>
 
               {/* Speech Sliders: Pitch, Rate, Lip-Sync */}
-              <div className="bg-[#202126] rounded-2xl border border-[#2A2C33] p-4 space-y-4">
+              <div className="bg-[#131622] rounded-[14px] border border-[#2A2C33] p-4 space-y-4">
                 {/* Lip Sync Delay Calibration */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-[#F2F2F2]/90 font-medium font-sans">Lip-Sync Calibration Delay</span>
-                    <span className="font-mono text-[#6E8BFF] text-[11px] font-semibold">{lipSyncDelayMs} ms</span>
+                    <span className="font-mono text-[#C4B5FD] text-[11px] font-semibold">{lipSyncDelayMs} ms</span>
                   </div>
                   <input
                     type="range"
@@ -869,7 +864,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                     step={5}
                     value={lipSyncDelayMs}
                     onChange={(e) => setLipSyncDelayMs(Number(e.target.value))}
-                    className="w-full h-1.5 bg-[#181818] rounded-lg appearance-none cursor-pointer accent-[#6E8BFF]"
+                    className="w-full h-1.5 bg-[#181818] rounded-lg appearance-none cursor-pointer accent-[#A78BFA]"
                   />
                   <p className="text-[10px] text-[#A7A9AF]/70 font-sans">
                     Fine-tune phoneme timing with bluetooth or speaker latency. Default is 0ms.
@@ -890,7 +885,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                       setAgentModeType(next ? 'repeat' : 'agent');
                     }}
                     className={`w-11 h-6 rounded-full transition-colors relative p-0.5 ${
-                      autoRepeat ? 'bg-[#6E8BFF]' : 'bg-[#181818] border border-[#2A2C33]'
+                      autoRepeat ? 'bg-[#A78BFA]' : 'bg-[#11131C] border border-[#2A2C33]'
                     }`}
                   >
                     <div
@@ -929,10 +924,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                           setAgentSpeed(mode.id);
                           setAgentModelName(mode.label);
                         }}
-                        className={`p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between ${
-                          isSelected
-                            ? 'bg-[#202126] border-[#6E8BFF]/60 ring-1 ring-[#6E8BFF]/25'
-                            : 'bg-[#181818] border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
+                        className={`p-3.5 rounded-[14px] border transition cursor-pointer flex items-center justify-between ${
+                          isSelected ? 'bg-[#202126] border-[#A78BFA]/50 ring-1 ring-[#A78BFA]/20' : 'bg-[#131622] border border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
                         }`}
                       >
                         <div>
@@ -942,7 +935,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                           <span className="text-[11px] text-[#A7A9AF]">{mode.desc}</span>
                         </div>
                         {isSelected && (
-                          <div className="w-6 h-6 rounded-full bg-[#6E8BFF] text-[#0B0D12] flex items-center justify-center shrink-0">
+                          <div className="w-5 h-5 rounded-full bg-[#A78BFA] text-[#0B0D12] flex items-center justify-center shrink-0">
                             <Check size={13} strokeWidth={2.5} />
                           </div>
                         )}
@@ -953,7 +946,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
               </div>
 
               {/* Always-On Microphone Setting */}
-              <div className="bg-[#202126] rounded-2xl border border-[#2A2C33] p-4 flex items-center justify-between">
+              <div className="bg-[#131622] rounded-[14px] border border-[#2A2C33] p-4 flex items-center justify-between">
                 <div>
                   <span className="text-xs font-semibold text-[#F2F2F2] block font-sans">
                     Always-On Microphone
@@ -968,7 +961,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   aria-checked={isAlwaysOnMic}
                   onClick={() => auraController.setAlwaysOnMic(!isAlwaysOnMic)}
                   className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
-                    isAlwaysOnMic ? 'bg-[#6E8BFF]' : 'bg-[#181818] border border-[#2A2C33]'
+                    isAlwaysOnMic ? 'bg-[#A78BFA]' : 'bg-[#11131C] border border-[#2A2C33]'
                   }`}
                   title={isAlwaysOnMic ? 'Disable Always-On Mic' : 'Enable Always-On Mic'}
                 >
@@ -989,10 +982,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   <button
                     type="button"
                     onClick={() => setActiveCamera('wide')}
-                    className={`py-3 px-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 ${
-                      activeCamera === 'wide'
-                        ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold border-transparent shadow-sm'
-                        : 'bg-[#181818] border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
+                    className={`py-2.5 px-3 rounded-full border text-xs font-medium flex items-center justify-center gap-2 transition active:scale-95 ${
+                      activeCamera === 'wide' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.12] shadow-sm' : 'bg-[#131622] border border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
                     }`}
                   >
                     <Maximize2 size={15} strokeWidth={1.5} />
@@ -1002,10 +993,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   <button
                     type="button"
                     onClick={() => setActiveCamera('closeup')}
-                    className={`py-3 px-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-95 ${
-                      activeCamera === 'closeup'
-                        ? 'bg-[#F2F2F2] text-[#0B0D12] font-semibold border-transparent shadow-sm'
-                        : 'bg-[#181818] border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
+                    className={`py-2.5 px-3 rounded-full border text-xs font-medium flex items-center justify-center gap-2 transition active:scale-95 ${
+                      activeCamera === 'closeup' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.12] shadow-sm' : 'bg-[#131622] border border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
                     }`}
                   >
                     <Focus size={15} strokeWidth={1.5} />
@@ -1015,7 +1004,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
               </div>
 
               {/* Status — clean, no model/DB info */}
-              <div className="bg-[#202126] rounded-2xl border border-[#2A2C33] p-4 space-y-0 text-xs">
+              <div className="bg-[#131622] rounded-[14px] border border-[#2A2C33] p-4 space-y-0 text-xs">
                 <div className="flex items-center justify-between py-2.5 border-b border-[#2A2C33]">
                   <span className="text-[#A7A9AF] font-sans">Assistant Status</span>
                   <span className="text-emerald-400 font-medium">Online & Ready</span>

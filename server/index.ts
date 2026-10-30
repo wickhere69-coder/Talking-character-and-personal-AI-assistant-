@@ -138,6 +138,18 @@ app.get('/api/status', (req, res) => {
 });
 
 const ttsAudioCache = new Map<string, Buffer>();
+const edgeTtsInstances = new Map<string, EdgeTTS>();
+function getEdgeTTS(voice: string): EdgeTTS {
+  let instance = edgeTtsInstances.get(voice);
+  if (!instance) {
+    instance = new EdgeTTS({
+      voice,
+      outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
+    });
+    edgeTtsInstances.set(voice, instance);
+  }
+  return instance;
+}
 const MAX_CACHE_ENTRIES = 120;
 
 // Voice map strictly mapping ElevenLabs voice IDs to Microsoft Neural voices
@@ -162,10 +174,7 @@ async function synthesizeNeuralAudio(text: string, voiceId?: string): Promise<Bu
 
   // 1. Primary: Microsoft Edge Neural TTS
   try {
-    const tts = new EdgeTTS({
-      voice: voiceName,
-      outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
-    });
+    const tts = getEdgeTTS(voiceName);
     const chunks: Buffer[] = [];
     for await (const chunk of tts.streamAudio(clean)) {
       if (Buffer.isBuffer(chunk)) {

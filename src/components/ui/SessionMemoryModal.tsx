@@ -48,18 +48,18 @@ export default function SessionMemoryModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
       <div
-        className="relative w-full max-w-lg bg-[#0D0F17]/95 border border-white/[0.1] rounded-3xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col max-h-[85vh]"
+        className="relative w-full max-w-lg bg-[#0D0F17]/95 border border-white/[0.08] rounded-[16px] p-6 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="session-memory-title"
       >
         {/* Top cyan/blue hairline */}
-        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#6E8BFF]/80 to-transparent" />
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#A78BFA]/50 to-transparent" />
 
         {/* Modal Header */}
         <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#6E8BFF]/15 border border-[#6E8BFF]/30 flex items-center justify-center text-[#6E8BFF]">
+            <div className="w-8 h-8 rounded-full bg-[#A78BFA]/15 border border-[#A78BFA]/25 flex items-center justify-center text-[#A78BFA]">
               <Brain size={20} strokeWidth={2} />
             </div>
             <div>
@@ -85,7 +85,7 @@ export default function SessionMemoryModal() {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto py-4 space-y-4 custom-scrollbar pr-1">
           {/* Metadata Row */}
-          <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-xs">
+          <div className="grid grid-cols-3 gap-2 p-3 rounded-[14px] bg-[#131622] border border-[#2A2C33] text-xs">
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] uppercase font-mono text-[#A7A9AF]/70 flex items-center gap-1">
                 <Clock size={11} /> Created
@@ -112,7 +112,7 @@ export default function SessionMemoryModal() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-mono uppercase tracking-wider text-[#A7A9AF] flex items-center gap-1.5">
-                <Tag size={12} className="text-[#6E8BFF]" /> Primary Session Topic
+                <Tag size={12} className="text-[#A78BFA]" /> Primary Session Topic
               </label>
               {!isEditingTopic && (
                 <button
@@ -121,7 +121,7 @@ export default function SessionMemoryModal() {
                     setTopicInput(session.topic);
                     setIsEditingTopic(true);
                   }}
-                  className="text-[11px] text-[#6E8BFF] hover:underline font-mono"
+                  className="text-[11px] text-[#A78BFA] hover:underline font-mono"
                 >
                   Edit Topic
                 </button>
@@ -136,13 +136,13 @@ export default function SessionMemoryModal() {
                   onChange={(e) => setTopicInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveTopic()}
                   placeholder="e.g. React Architecture, Career Prep"
-                  className="flex-1 px-3 py-1.5 rounded-xl bg-white/[0.05] border border-[#6E8BFF]/50 text-xs text-[#F2F2F2] focus:outline-none"
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-white/[0.05] border border-[#A78BFA]/50 text-xs text-[#F2F2F2] focus:outline-none"
                   autoFocus
                 />
                 <button
                   type="button"
                   onClick={handleSaveTopic}
-                  className="px-3 py-1.5 rounded-xl bg-[#6E8BFF] text-[#0B0D12] text-xs font-semibold flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-full bg-[#A78BFA] text-[#0B0D12] text-xs font-semibold flex items-center gap-1"
                 >
                   <Check size={12} strokeWidth={2.5} /> Save
                 </button>
@@ -155,9 +155,9 @@ export default function SessionMemoryModal() {
                 </button>
               </div>
             ) : (
-              <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs text-[#F2F2F2] font-medium flex items-center justify-between">
+              <div className="px-3.5 py-2.5 rounded-[14px] bg-[#131622] border border-[#2A2C33] text-xs text-[#F2F2F2] font-medium flex items-center justify-between">
                 <span>{session.topic || 'General Assistant'}</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#6E8BFF]/15 text-[#9CB5FF] border border-[#6E8BFF]/25">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#A78BFA]/15 text-[#C4B5FD] border border-[#A78BFA]/25">
                   Active Scope
                 </span>
               </div>
@@ -167,9 +167,9 @@ export default function SessionMemoryModal() {
           {/* Rolling Summary */}
           <div className="space-y-1.5">
             <span className="text-[11px] font-mono uppercase tracking-wider text-[#A7A9AF] flex items-center gap-1.5">
-              <Sparkles size={12} className="text-violet-400" /> Rolling Conversation Summary
+              <Sparkles size={12} className="text-[#A78BFA]" /> Rolling Conversation Summary
             </span>
-            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-xs text-[#F2F2F2]/90 leading-relaxed font-sans min-h-[60px] whitespace-pre-wrap">
+            <div className="p-3.5 rounded-[14px] bg-[#131622] border border-[#2A2C33] text-xs text-[#F2F2F2]/90 leading-relaxed font-sans min-h-[60px] whitespace-pre-wrap">
               {session.summary?.trim() || (
                 <span className="text-[#A7A9AF]/60 italic font-normal">
                   No summary generated yet. The AI automatically compiles a rolling summary as conversation turns progress.
@@ -184,7 +184,7 @@ export default function SessionMemoryModal() {
               <Brain size={12} className="text-emerald-400" /> Established Facts, Decisions & Preferences
             </span>
             {session.establishedFacts && session.establishedFacts.length > 0 ? (
-              <ul className="space-y-1.5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.08]">
+              <ul className="space-y-1.5 p-3 rounded-[14px] bg-[#131622] border border-[#2A2C33]">
                 {session.establishedFacts.map((fact, idx) => (
                   <li key={idx} className="text-xs text-[#F2F2F2]/85 flex items-start gap-2 leading-relaxed">
                     <span className="text-emerald-400 font-bold mt-0.5">•</span>
@@ -193,7 +193,7 @@ export default function SessionMemoryModal() {
                 ))}
               </ul>
             ) : (
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-xs text-[#A7A9AF]/60 italic">
+              <div className="p-3.5 rounded-[14px] bg-[#131622] border border-[#2A2C33] text-xs text-[#A7A9AF]/60 italic">
                 No specific decisions or facts recorded in this session yet.
               </div>
             )}
@@ -206,10 +206,10 @@ export default function SessionMemoryModal() {
             type="button"
             onClick={handleRefresh}
             disabled={isRefreshing || session.messageCount < 2}
-            className="px-3.5 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-[#F2F2F2] text-xs font-medium border border-white/[0.08] transition flex items-center gap-2 disabled:opacity-50 active:scale-95"
+            className="px-3.5 py-2 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-[#F2F2F2] text-xs font-medium border border-white/[0.08] transition flex items-center gap-2 disabled:opacity-50 active:scale-95"
             title="Synthesize and update rolling summary from latest messages"
           >
-            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-[#6E8BFF]' : 'text-[#A7A9AF]'} />
+            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-[#A78BFA]' : 'text-[#A7A9AF]'} />
             <span>{isRefreshing ? 'Updating Summary...' : 'Refresh Memory'}</span>
           </button>
 

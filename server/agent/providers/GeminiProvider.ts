@@ -89,21 +89,14 @@ export class GeminiProvider implements IAIProvider {
 
   private getCandidateModels(requestedModel?: string): string[] {
     const candidates = [
-      (requestedModel || this.defaultModel || 'gemini-3.5-flash-lite').replace(/^models\//, ''),
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash-lite',
+      (requestedModel || '').replace(/^models\//, ''),
       'gemini-flash-lite-latest',
-      'gemma-4-26b-a4b-it'
-    ];
-    // Exclude quota-exhausted models (3.6-flash, 3.8-flash, 3-flash-preview)
-    return candidates.filter((m, idx, arr) => 
-      arr.indexOf(m) === idx && 
-      !m.includes('3.6') && 
-      !m.includes('3.8') && 
-      !m.includes('3-flash-preview') &&
-      !m.includes('2.5-pro') &&
-      !m.includes('2.0')
-    );
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite'
+    ].filter(Boolean);
+    return Array.from(new Set(candidates));
   }
 
   async generateResponse(
@@ -269,7 +262,16 @@ export class GeminiProvider implements IAIProvider {
 
     const explicitSystem = messages.find((m) => m.role === 'system')?.content || '';
     const voiceDirective = isConversational
-      ? 'You are Aura, an articulate, witty, and knowledgeable AI companion. Give clear, thorough, and engaging spoken answers (typically 2 to 5 well-crafted sentences). Never give brief or insufficient one-liners. Provide real substance and detail while speaking naturally. Never output markdown asterisks, hashtags, or bullet lists in your response.'
+      ? `You are Aura, an articulate, witty, and knowledgeable AI companion.
+1. Adaptive Answering Effort & Length:
+- For small, simple, or straightforward questions (such as greetings, basic arithmetic like 2+2, single-fact queries, yes/no, definitions, or quick checks): Give a direct, punchy, one-sentence answer (or two short sentences at most) with zero filler. Never give lengthy answers or unsolicited exposition to small questions.
+- For medium questions: Provide two to three concise, articulate spoken sentences.
+- For complex, analytical, or deep reasoning questions: Scale up your reasoning effort and depth accordingly, providing a thorough, structured, and insightful multi-sentence explanation.
+2. Automatic Sentence & Typo Auto-Correction:
+- Users interact via voice speech-to-text, which frequently introduces phonetic mishearings, garbled words, spelling errors, or missing punctuation (e.g., 'wether in pares' -> 'weather in Paris', 'whats 10 pul 20' -> 'what is 10 plus 20', 'supper bowl' -> 'Super Bowl').
+- Automatically infer the user's true intended question, silently correct the sentence in your mind, and answer the intended question directly and accurately. Never lecture the user about errors.
+3. Pure Spoken Cadence:
+- Never output markdown asterisks, hashtags, or bullet lists in your response. Speak in natural, flowing conversational English.`
       : '';
     const systemPrompt = [voiceDirective, explicitSystem].filter(Boolean).join('\n\n');
 
@@ -322,9 +324,9 @@ export class GeminiProvider implements IAIProvider {
             if (!fullContent) {
               innerAbort.abort();
               try { res.data.destroy(); } catch {}
-              reject(new Error(`Native Gemini first token timeout (>25s) for ${candidateModel}`));
+              reject(new Error(`Native Gemini first token timeout (>6s) for ${candidateModel}`));
             }
-          }, 25000);
+          }, 6000);
 
           res.data.on('data', (chunk: Buffer) => {
             if (firstChunkTimer) {

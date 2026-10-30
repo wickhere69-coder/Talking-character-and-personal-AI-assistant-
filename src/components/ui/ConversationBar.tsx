@@ -4,15 +4,6 @@ import { Plus, ArrowUp, Mic, Square } from 'lucide-react';
 import { auraController } from '@/services/auraConversationController';
 import { isComplexReasoning } from '@/utils/reasoningDetector';
 
-/**
- * ConversationBar — Luxury Frosted Glass Conversational Input Capsule.
- * 
- * Features:
- * - Ultra-refined glassmorphism with specular reflection highlights.
- * - Integrated real-time intelligence mode badge (Deep Think / Balanced / Instant).
- * - Multi-stage dynamic microphone button with pulse aura and ripple rings.
- * - Smooth haptic-feel micro-interactions.
- */
 export default function ConversationBar() {
   const [inputText, setInputText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -37,7 +28,7 @@ export default function ConversationBar() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      handleSend(inputText || (isListening ? scriptText : ''));
     }
   };
 
@@ -69,7 +60,6 @@ export default function ConversationBar() {
       auraController.toggleListening();
     }
   };
-
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -107,14 +97,14 @@ export default function ConversationBar() {
         className="hidden"
       />
 
-      {/* ── Luxury Sculptured Capsule ── */}
-      <div className="relative w-full flex items-center justify-between h-14 md:h-[62px] px-3.5 rounded-full bg-[#0D0F17]/85 backdrop-blur-2xl border border-white/[0.1] hover:border-white/[0.18] focus-within:border-[#6E8BFF]/70 focus-within:ring-2 focus-within:ring-[#6E8BFF]/20 shadow-[0_20px_60px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.12)] transition-all duration-200 gap-2.5 group">
+      {/* ── Capsule Input Bar ── */}
+      <div className="relative w-full flex items-center justify-between h-14 md:h-[60px] px-3.5 rounded-full bg-[#0D0F17]/95 backdrop-blur-2xl border border-white/[0.08] hover:border-white/[0.15] focus-within:border-[#A78BFA]/50 focus-within:ring-1 focus-within:ring-[#A78BFA]/20 shadow-[0_16px_48px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.08)] transition-all duration-200 gap-2.5 group">
 
         {/* Left: Attachment (+) Button */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="w-8 h-8 rounded-full text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.08] transition flex items-center justify-center shrink-0 active:scale-95"
+          className="w-8 h-8 rounded-full text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.06] transition flex items-center justify-center shrink-0 active:scale-95"
           title="Attach 3D model or document"
         >
           <Plus size={16} strokeWidth={2} />
@@ -128,17 +118,18 @@ export default function ConversationBar() {
           onKeyDown={handleKeyDown}
           disabled={isBusy}
           placeholder={placeholder}
-          className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none focus:border-none shadow-none text-sm md:text-[14px] text-[#F2F2F2] placeholder-[#A7A9AF]/50 px-2 font-sans font-normal disabled:opacity-50" style={{ outline: 'none', border: 'none', boxShadow: 'none', background: 'transparent' }}
+          className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none focus:border-none shadow-none text-xs md:text-sm text-[#F2F2F2] placeholder-[#A7A9AF] px-2 font-sans font-normal disabled:opacity-50"
+          style={{ outline: 'none', border: 'none', boxShadow: 'none', background: 'transparent' }}
         />
 
         {/* Right Controls */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Send button (appears when input is non-empty) */}
-          {inputText.trim().length > 0 && !isBusy && (
+          {/* Send button (appears when input or spoken transcript is non-empty) */}
+          {(inputText.trim().length > 0 || (isListening && scriptText.trim().length > 0)) && !isBusy && (
             <button
               type="button"
-              onClick={() => handleSend()}
-              className="w-8 h-8 rounded-full bg-gradient-to-r from-white to-[#EDEDED] text-[#0B0D12] hover:brightness-105 active:scale-95 transition flex items-center justify-center shadow-md font-semibold shrink-0"
+              onClick={() => handleSend(inputText || scriptText)}
+              className="w-8 h-8 rounded-full bg-[#A78BFA] text-[#0B0D12] hover:bg-[#C4B5FD] active:scale-95 transition flex items-center justify-center shadow-sm font-semibold shrink-0"
               title="Send message"
             >
               <ArrowUp size={15} strokeWidth={2.5} />
@@ -150,7 +141,7 @@ export default function ConversationBar() {
             <button
               type="button"
               onClick={() => auraController.stopConversation()}
-              className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 hover:text-rose-300 flex items-center justify-center transition-all duration-200 active:scale-95 shrink-0 border border-rose-500/30 shadow-[0_0_16px_rgba(244,63,94,0.3)]"
+              className="w-9 h-9 rounded-full bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 flex items-center justify-center transition active:scale-95 shrink-0 border border-rose-500/25"
               title="Stop speaking"
             >
               <Square size={12} strokeWidth={2.5} fill="currentColor" />
@@ -159,12 +150,12 @@ export default function ConversationBar() {
             <button
               type="button"
               onClick={handleToggleMic}
-              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 active:scale-95 shrink-0 relative ${
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition active:scale-95 shrink-0 relative ${
                 isListening
-                  ? 'bg-gradient-to-br from-[#6E8BFF] to-[#8B5CF6] text-white shadow-[0_0_24px_rgba(110,139,255,0.8)]'
+                  ? 'bg-[#A78BFA] text-[#0B0D12] shadow-sm'
                   : isAlwaysOnMic
-                  ? 'text-[#6E8BFF] bg-[#6E8BFF]/15 hover:bg-[#6E8BFF]/25 border border-[#6E8BFF]/35 shadow-[0_0_12px_rgba(110,139,255,0.25)]'
-                  : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.08]'
+                  ? 'text-[#A78BFA] bg-[#A78BFA]/15 hover:bg-[#A78BFA]/25 border border-[#A78BFA]/30'
+                  : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.06]'
               }`}
               title={
                 isListening
@@ -176,10 +167,7 @@ export default function ConversationBar() {
             >
               <Mic size={17} strokeWidth={2} />
               {isListening && (
-                <>
-                  <span className="absolute inset-0 rounded-full border-2 border-[#6E8BFF] animate-ping opacity-75" />
-                  <span className="absolute -inset-1 rounded-full border border-violet-400 animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite] opacity-50" />
-                </>
+                <span className="absolute inset-0 rounded-full border border-[#A78BFA] animate-ping opacity-60" />
               )}
             </button>
           )}

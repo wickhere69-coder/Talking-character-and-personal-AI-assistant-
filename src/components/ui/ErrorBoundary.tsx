@@ -33,8 +33,8 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#09090B] p-6 z-50 text-center">
-          <div className="max-w-md w-full bg-[#0F0F12] border border-rose-500/20 rounded-2xl p-6 shadow-[0_24px_48px_rgba(0,0,0,0.7)] flex flex-col items-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B0D12] p-6 z-50 text-center">
+          <div className="max-w-md w-full bg-[#131622] border border-rose-500/20 rounded-[16px] p-6 shadow-[0_24px_48px_rgba(0,0,0,0.7)] flex flex-col items-center">
             <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-3.5">
               <AlertCircle size={24} strokeWidth={1.5} className="text-rose-400" />
             </div>

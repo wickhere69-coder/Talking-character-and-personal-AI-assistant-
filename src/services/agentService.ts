@@ -129,12 +129,23 @@ export async function streamAgentConversation(
             sentenceBuffer += chunk;
             callbacks.onChunk?.(chunk);
 
-            // Split on sentence boundaries and pauses (. ! ? , ; :) for much faster time-to-first-sound
-            const match = sentenceBuffer.match(/^(.*?[.!?,;:]["']?)(?:\s+|\n+)(.*)$/s);
-            if (match) {
-              const sentence = match[1];
-              sentenceBuffer = match[2];
-              dispatchSentence(sentence);
+            // Split strictly on complete sentence boundaries (. ! ?) followed by whitespace or line breaks
+            // Avoid chopping at commas or semicolons to guarantee continuous, natural human prosody
+            const terminalMatch = sentenceBuffer.match(/^(.*?[.!?]["']?)(?:\s+|\n+)(.*)$/s);
+            if (terminalMatch) {
+              const candidate = terminalMatch[1].trim();
+              // Prevent splitting on decimal numbers (e.g. "3.14") or abbreviations (e.g. "e.g.", "i.e.", "Mr.", "Dr.")
+              const isAbbrOrNumber = /\b(?:e\.g|i\.e|mr|mrs|ms|dr|prof|vs|etc|\d+)\.[ "']?$/i.test(candidate);
+              if (!isAbbrOrNumber && candidate.length > 0) {
+                sentenceBuffer = terminalMatch[2];
+                dispatchSentence(candidate);
+              }
+            } else if (sentenceBuffer.includes('\n\n')) {
+              // Paragraph breaks
+              const parts = sentenceBuffer.split('\n\n');
+              const head = parts.shift()?.trim();
+              sentenceBuffer = parts.join('\n\n');
+              if (head) dispatchSentence(head);
             }
           }
 

@@ -62,10 +62,10 @@ export default function LowerThird() {
       }`}
     >
       {/* ── Cinematic Teleprompter Glass Capsule ── */}
-      <div className="relative overflow-hidden bg-[#0D0F17]/88 backdrop-blur-2xl rounded-2xl px-5 py-4 border border-white/[0.1] shadow-[0_24px_64px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.1)] pointer-events-auto flex flex-col gap-2.5 transition-all duration-200">
+      <div className="relative overflow-hidden bg-[#0D0F17]/95 backdrop-blur-2xl rounded-[16px] px-5 py-4 border border-white/[0.08] shadow-2xl pointer-events-auto flex flex-col gap-2.5 transition-all duration-200">
         
         {/* Subtle Iridescent Top Accent Hairline */}
-        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#6E8BFF]/70 to-transparent" />
+        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#A78BFA]/50 to-transparent" />
 
         {/* Confirmation Banner */}
         {pendingConfirmation ? (
@@ -83,7 +83,7 @@ export default function LowerThird() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <button type="button" onClick={() => handleConfirmAction(true)}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-[0_2px_12px_rgba(5,150,105,0.35)] transition-all duration-150 ease-out flex items-center gap-1.5 active:scale-95"
+                  className="px-4 py-2 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-all duration-150 ease-out flex items-center gap-1.5 active:scale-95"
                 >
                   <Check size={13} strokeWidth={2} /><span>Approve</span>
                 </button>
@@ -106,7 +106,7 @@ export default function LowerThird() {
                     <React.Fragment key={i}>
                       <span className={`transition-all duration-150 inline-block ${
                         isCurrent
-                          ? 'text-white font-semibold drop-shadow-[0_0_12px_rgba(110,139,255,0.8)] bg-[#6E8BFF]/25 border border-[#6E8BFF]/50 px-1.5 py-0.5 rounded-lg shadow-sm scale-[1.03]'
+                          ? 'text-white font-semibold bg-[#A78BFA]/20 border border-[#A78BFA]/40 px-1.5 py-0.5 rounded-lg shadow-sm'
                           : i < currentWordIndex
                           ? 'text-[#F2F2F2]/40'
                           : 'text-[#F2F2F2]/85'
@@ -123,16 +123,16 @@ export default function LowerThird() {
             <div className="flex items-center gap-2 shrink-0 pt-0.5">
               {/* Animated Speaking Waveform Indicator */}
               {(isSpeaking || playbackState === 'playing') && (
-                <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[#6E8BFF]/15 border border-[#6E8BFF]/30 text-[#6E8BFF]">
-                  <span className="w-[2px] h-2.5 bg-[#6E8BFF] rounded-full animate-[pulse_0.6s_ease-in-out_infinite]" />
-                  <span className="w-[2px] h-3.5 bg-[#6E8BFF] rounded-full animate-[pulse_0.4s_ease-in-out_infinite]" />
-                  <span className="w-[2px] h-2 bg-[#6E8BFF] rounded-full animate-[pulse_0.8s_ease-in-out_infinite]" />
-                  <span className="w-[2px] h-3 bg-[#6E8BFF] rounded-full animate-[pulse_0.5s_ease-in-out_infinite]" />
+                <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[#A78BFA]/15 border border-[#A78BFA]/25 text-[#A78BFA]">
+                  <span className="w-[2px] h-2.5 bg-[#A78BFA] rounded-full animate-[pulse_0.6s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-3.5 bg-[#A78BFA] rounded-full animate-[pulse_0.4s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-2 bg-[#A78BFA] rounded-full animate-[pulse_0.8s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-3 bg-[#A78BFA] rounded-full animate-[pulse_0.5s_ease-in-out_infinite]" />
                 </div>
               )}
 
               {currentEmotion.primary !== 'neutral' && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#6E8BFF]/15 text-[#6E8BFF] border border-[#6E8BFF]/25 capitalize">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#A78BFA]/15 text-[#C4B5FD] border border-[#A78BFA]/25 rounded-full capitalize">
                   {currentEmotion.primary}
                 </span>
               )}

@@ -15,7 +15,7 @@ export default function DeleteSessionModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
       <div 
-        className="relative w-full max-w-md bg-[#0D0F17]/95 border border-white/[0.1] rounded-3xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.9)] overflow-hidden"
+        className="relative w-full max-w-md bg-[#0D0F17]/95 border border-white/[0.08] rounded-[16px] p-6 shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-session-title"
@@ -24,7 +24,7 @@ export default function DeleteSessionModal() {
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500/80 to-transparent" />
 
         <div className="flex items-start justify-between gap-4">
-          <div className="w-10 h-10 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+          <div className="w-10 h-10 rounded-full bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
             <AlertTriangle size={20} strokeWidth={2} />
           </div>
 
@@ -59,7 +59,7 @@ export default function DeleteSessionModal() {
           <button
             type="button"
             onClick={handleDelete}
-            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-[0_2px_12px_rgba(225,29,72,0.35)] transition-all duration-150 flex items-center gap-1.5 active:scale-95"
+            className="px-4 py-2 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-medium transition active:scale-95 flex items-center gap-1.5"
           >
             <Trash2 size={13} strokeWidth={2} />
             <span>Delete Session</span>

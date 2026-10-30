@@ -6,7 +6,7 @@ import {
   type SpeechRecognizerController
 } from './webSpeechService';
 import { voiceManager } from './voiceManager';
-import { sendAgentMessage } from './agentService';
+import { sendAgentMessage, streamAgentConversation } from './agentService';
 import { detectEmotion } from './emotionDetector';
 import { getSpeechCompletionDelay } from '@/utils/speechCompletionDelay';
 import { isComplexReasoning } from '@/utils/reasoningDetector';
@@ -130,7 +130,13 @@ class AuraConversationController {
 
   public toggleListening() {
     if (this.store.isListening || this.activeRecognizer?.isActive()) {
-      this.stopListening();
+      const pendingText = (this.accumulated || this.store.scriptText || '').trim();
+      if (pendingText && pendingText.length >= 2) {
+        // User tapped the mic button while speech was transcribed: submit question immediately!
+        this.onUserSpeechComplete(pendingText);
+      } else {
+        this.stopListening();
+      }
     } else if (this.isProcessingOrSpeaking) {
       this.stopConversation();
     } else {
@@ -242,6 +248,12 @@ class AuraConversationController {
       },
       onEnd: () => {
         if (this.intentionallyStopped) return;
+
+        // If a silenceTimer is currently waiting for end-of-speech pause, let it finish so the user isn't prematurely cut off
+        if (this.silenceTimer && this.accumulated.trim().length >= 2) {
+          return;
+        }
+
         this.store.setIsListening(false);
 
         // In Always-On mode, cleanly restart listening if idle
@@ -309,6 +321,7 @@ class AuraConversationController {
 
     this.streamAbort?.abort();
     this.streamAbort = new AbortController();
+    const abortSignal = this.streamAbort.signal;
     this.isProcessingOrSpeaking = true;
     this.clearTimers();
     this.activeRecognizer?.pause();
@@ -316,7 +329,7 @@ class AuraConversationController {
     this.accumulated = '';
     this.store.setIsListening(false);
 
-    // Intelligently auto-switch to Deep Think (LangGraph) for complex problems / reasoning
+    // Auto-switch to Deep Think ONLY for explicit complex multi-step reasoning requests
     const isReasoning = isComplexReasoning(trimmed);
     const providerToSend = isReasoning
       ? 'langgraph'
@@ -332,112 +345,127 @@ class AuraConversationController {
 
     voiceManager.setOnPlaybackEnd(null);
 
-    try {
-      this.setState('thinking');
-      this.store.setAgentStatus('thinking');
-      this.store.setPlaybackState('loading');
-      this.store.setError(null);
-      this.store.setCurrentAgentAction('Thinking & analyzing query...');
+    const sessionStore = useSessionStore.getState();
+    const currentSessionId = sessionStore.activeSessionId;
 
-            const sessionStore = useSessionStore.getState();
-      const currentSessionId = sessionStore.activeSessionId;
-
-      // Append user message to active session
-      if (currentSessionId) {
-        sessionStore.appendLocalMessage({
-          id: `msg_u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          sessionId: currentSessionId,
-          role: 'user',
-          content: trimmed,
-          createdAt: Date.now(),
-          status: 'delivered'
-        });
-      }
-
-      const res = await sendAgentMessage(trimmed, {
-        mode: this.store.agentModeType,
-        modelProvider: providerToSend,
-        maxTokens: 2048
-      }, currentSessionId || undefined);
-
-      if (this.streamAbort?.signal.aborted) return;
-
-      // Session switch guard: If user switched sessions while LLM was processing, save response into the original session!
-      if (currentSessionId && useSessionStore.getState().activeSessionId !== currentSessionId) {
-        console.log('[Aura] Session switched during inference; persisting completed response to original session.');
-        useSessionStore.getState().appendLocalMessage({
-          id: `msg_a_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          sessionId: currentSessionId,
-          role: 'assistant',
-          content: res.response,
-          createdAt: Date.now(),
-          status: 'delivered',
-          modelUsed: res.modelUsed
-        });
-        this.isProcessingOrSpeaking = false;
-        return;
-      }
-
-      // Append assistant message to active session
-      if (currentSessionId && res.response) {
-        useSessionStore.getState().appendLocalMessage({
-          id: `msg_a_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          sessionId: currentSessionId,
-          role: 'assistant',
-          content: res.response,
-          createdAt: Date.now(),
-          status: 'delivered',
-          modelUsed: res.modelUsed
-        });
-      }
-
-      if (this.streamAbort?.signal.aborted) return;
-
-      const fullResponse = res.response;
-      if (!fullResponse?.trim()) {
-        this.isProcessingOrSpeaking = false;
-        this.store.setAgentStatus('idle');
-        this.setState('sleeping');
-        return;
-      }
-
-      // Synchronize intelligence mode
-      if (res.modelUsed?.toLowerCase().includes('langgraph') || res.modelUsed?.toLowerCase().includes('reasoning') || isReasoning) {
-        this.store.setAgentModelName('Deep Think');
-        this.store.setAgentSpeed('langgraph');
-      } else if (this.store.agentSpeed !== 'langgraph' && this.store.agentSpeed !== 'instant') {
-        this.store.setAgentModelName('Balanced');
-        this.store.setAgentSpeed('gemini');
-      }
-
-      // Save for echo suppression and voice playback
-      const cleaned = cleanTextForSpeech(fullResponse);
-      this.lastSpokenAnswer = cleaned;
-
-      const emotion = detectEmotion(fullResponse);
-      this.store.setCurrentEmotion(emotion);
-      this.store.setCurrentSentence(cleaned);
-      this.store.setSpeechText(cleaned);
-      this.store.setLastFullResponse(fullResponse);
-
-      this.setState('speaking');
-      this.store.setAgentStatus('speaking');
-
-      const voice = voiceManager.resolveCurrentVoice();
-      const key = typeof window !== 'undefined'
-        ? localStorage.getItem('elevenlabs_api_key') || ''
-        : '';
-
-      voiceManager.setOnPlaybackEnd(() => {
-        voiceManager.setOnPlaybackEnd(null);
-        this.onResponseComplete();
+    // 1. Append user message immediately to the active session
+    if (currentSessionId) {
+      sessionStore.appendLocalMessage({
+        id: `msg_u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        sessionId: currentSessionId,
+        role: 'user',
+        content: trimmed,
+        createdAt: Date.now(),
+        status: 'delivered'
       });
+    }
 
-      await voiceManager.speak(cleaned, voice, key);
+    // 2. Set state to thinking - DO NOT show subtitle text yet
+    this.setState('thinking');
+    this.store.setAgentStatus('thinking');
+    this.store.setPlaybackState('loading');
+    this.store.setError(null);
+    this.store.setCurrentAgentAction('Thinking & analyzing query...');
+    this.store.setSpeechText('');
+    this.store.setCurrentSentence('');
 
+    const assistantMsgId = `msg_a_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    let accumulatedText = '';
+    let hasStartedSpeaking = false;
+
+    // 3. Start streaming sentence queue in voiceManager
+    voiceManager.startStreamSession(() => {
+      this.onResponseComplete();
+    });
+
+    try {
+      await streamAgentConversation(
+        trimmed,
+        {
+          mode: this.store.agentModeType,
+          modelProvider: providerToSend,
+          maxTokens: 2048
+        },
+        {
+          onSentence: (sentence: string) => {
+            if (abortSignal.aborted) return;
+            const cleaned = cleanTextForSpeech(sentence);
+            if (cleaned.length > 0) {
+              if (!hasStartedSpeaking) {
+                hasStartedSpeaking = true;
+                this.setState('speaking');
+                this.store.setAgentStatus('speaking');
+              }
+              voiceManager.enqueueSentence(cleaned);
+            }
+          },
+          onChunk: (chunk: string) => {
+            if (abortSignal.aborted) return;
+            accumulatedText += chunk;
+            if (currentSessionId && accumulatedText.trim()) {
+              useSessionStore.getState().appendLocalMessage({
+                id: assistantMsgId,
+                sessionId: currentSessionId,
+                role: 'assistant',
+                content: accumulatedText,
+                createdAt: Date.now(),
+                status: 'delivered',
+                modelUsed: providerToSend
+              });
+            }
+          },
+          onComplete: (fullResponse: string, modelUsed: string, respSessionId?: string) => {
+            if (abortSignal.aborted) return;
+            voiceManager.notifyStreamDone();
+
+            const finalContent = fullResponse?.trim() || accumulatedText.trim();
+            const targetSession = respSessionId || currentSessionId;
+
+            if (targetSession && finalContent) {
+              useSessionStore.getState().appendLocalMessage({
+                id: assistantMsgId,
+                sessionId: targetSession,
+                role: 'assistant',
+                content: finalContent,
+                createdAt: Date.now(),
+                status: 'delivered',
+                modelUsed
+              });
+            }
+
+            const cleaned = cleanTextForSpeech(finalContent);
+            this.lastSpokenAnswer = cleaned;
+            this.store.setLastFullResponse(finalContent);
+            this.store.setCurrentEmotion(detectEmotion(finalContent));
+
+            if (modelUsed?.toLowerCase().includes('langgraph') || isReasoning) {
+              this.store.setAgentModelName('Deep Think');
+              this.store.setAgentSpeed('langgraph');
+            } else if (this.store.agentSpeed !== 'langgraph' && this.store.agentSpeed !== 'instant') {
+              this.store.setAgentModelName('Balanced');
+              this.store.setAgentSpeed('gemini');
+            }
+          },
+          onError: (err: Error) => {
+            if (abortSignal.aborted) return;
+            console.error('[Aura] Streaming conversation error:', err);
+            voiceManager.stopAll('stream_error');
+            this.isProcessingOrSpeaking = false;
+            this.store.setAgentStatus('error');
+            this.store.setError(err?.message || 'Query failed');
+            setTimeout(() => {
+              this.store.setAgentStatus('idle');
+              this.setState('sleeping');
+            }, 2000);
+          }
+        },
+        abortSignal,
+        currentSessionId || undefined
+      );
     } catch (err: any) {
-      if (this.streamAbort?.signal.aborted) return;
-      console.error('[Aura] Query error:', err);
+      if (abortSignal.aborted) return;
+      console.error('[Aura] processQuery error:', err);
+      voiceManager.stopAll('query_error');
       this.isProcessingOrSpeaking = false;
       this.store.setAgentStatus('error');
       this.store.setError(err?.message || 'Query failed');

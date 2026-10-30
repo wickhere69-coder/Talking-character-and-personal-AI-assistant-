@@ -19,6 +19,51 @@ import { ContextManager } from './memory/ContextManager';
 import { SessionManager } from './memory/SessionManager';
 import { PermissionManager } from './permissions/PermissionManager';
 
+function normalizeVoiceInput(raw: string): string {
+  let text = raw || '';
+  // Common phonetic voice STT corrections
+  text = text.replace(/\b(wether|weathr|waether)\b/gi, 'weather');
+  text = text.replace(/\b(fore\s+cast|forcast|forcasting)\b/gi, 'forecast');
+  text = text.replace(/\b(temprature|temperture|tempreture)\b/gi, 'temperature');
+  text = text.replace(/\b(celcius|celcious)\b/gi, 'celsius');
+  text = text.replace(/\b(farenheit|fahrenhiet|fairnheit)\b/gi, 'fahrenheit');
+  text = text.replace(/\b(\d+)\s+(?:pul|pluss|pls)\s+(\d+)\b/gi, '$1 plus $2');
+  return text;
+}
+
+function extractWeatherLocation(userMessage: string): string | null {
+  const q = userMessage.trim().replace(/[?!.,]/g, '');
+
+  // 1. in/for/at/around/of <location>
+  let match = q.match(/\b(?:in|for|at|around|of)\s+([A-Za-z\s.-]+?)(?:\s+(?:today|tomorrow|tonight|this week|now|right now|please)|$)/i);
+  if (match && match[1].trim()) {
+    const loc = match[1].trim();
+    if (!['the', 'my area', 'here', 'outside', 'this city', 'town', 'my location'].includes(loc.toLowerCase())) {
+      return loc;
+    }
+  }
+
+  // 2. <location> weather / forecast / temperature
+  match = q.match(/\b([A-Za-z\s.-]+?)\s+(?:weather|forecast|temperature|temp)\b/i);
+  if (match && match[1].trim()) {
+    const loc = match[1].trim().replace(/^(what is|whats|what's|how is|how's|hows|tell me|the|check)\s+/i, '').trim();
+    if (loc && !['the', 'current', 'today', 'my', 'local', 'live', 'upcoming'].includes(loc.toLowerCase())) {
+      return loc;
+    }
+  }
+
+  // 3. weather/forecast in/for <location>
+  match = q.match(/\b(?:weather|forecast|temperature)\s+(?:in|for|at|of)?\s*([A-Za-z\s.-]+)/i);
+  if (match && match[1].trim()) {
+    const loc = match[1].trim().replace(/\s+(today|tomorrow|now|right now|please)$/i, '').trim();
+    if (loc && !['like', 'outside', 'today', 'tomorrow', 'now', 'right now', 'here'].includes(loc.toLowerCase())) {
+      return loc;
+    }
+  }
+
+  return null;
+}
+
 function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], providerName?: string): ToolDefinition[] {
   const lower = userMessage.toLowerCase().trim();
 
@@ -38,7 +83,7 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
   ];
   const taskKeywords = ['add task', 'list tasks', 'todo', 'to-do', 'complete task', 'add note', 'list notes', 'delete note'];
   const memoryKeywords = ['remember that', 'remember my', 'recall my', 'what did i tell you', 'my favorite'];
-  const weatherKeywords = ['weather', 'forecast', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'humidity', 'predict weather', 'storm', 'celsius', 'fahrenheit'];
+  const weatherKeywords = ['weather', 'wether', 'forecast', 'fore cast', 'temperature', 'temprature', 'rain', 'raining', 'snow', 'snowing', 'wind', 'sunny', 'cloudy', 'humidity', 'predict weather', 'storm', 'celsius', 'fahrenheit', 'degrees'];
   const webKeywords = [
     // Use explicit phrases instead of bare 'search' to avoid matching "search files",
     // "search notes", "search my tasks" which should route to file/task tools.
@@ -92,8 +137,18 @@ function synthesizeToolResults(toolsExecuted: AgentChatResponse['toolsExecuted']
   }
   const weatherTool = toolsExecuted.find(t => t.name === 'predict_weather' || t.name === 'get_weather');
   const webSearchTool = toolsExecuted.find(t => t.name === 'web_search');
-  if (weatherTool && weatherTool.result.message) {
-    return weatherTool.result.message;
+  if (weatherTool) {
+    const d = weatherTool.result?.data;
+    if (d?.location && d?.current) {
+      const cur = d.current;
+      const forecastText = Array.isArray(d.forecast) && d.forecast.length > 0
+        ? ` Today will see ${d.forecast[0].condition.toLowerCase()} with a high of ${d.forecast[0].tempMaxC} degrees Celsius and a low of ${d.forecast[0].tempMinC} degrees.`
+        : '';
+      return `In ${d.location}, it is currently ${cur.condition.toLowerCase()} at ${cur.temperatureC} degrees Celsius (${cur.temperatureF} degrees Fahrenheit), with ${cur.humidity} percent humidity.${forecastText}`;
+    }
+    if (weatherTool.result?.message) {
+      return weatherTool.result.message;
+    }
   }
   if (webSearchTool && Array.isArray(webSearchTool.result.data) && webSearchTool.result.data.length > 0) {
     return `According to the latest information: ${webSearchTool.result.data.slice(0, 2).join(' ')}`;
@@ -179,11 +234,8 @@ export class AgentCore {
     );
 
     const isConversational = config.mode === 'conversational' || config.mode === 'chat';
-    if (isConversational) {
-      config.toolsEnabled = false;
-      if (!config.maxTokens) {
-        config.maxTokens = 2048; // Ample token headroom for high-reasoning models (Gemini 2.5 Flash)
-      }
+    if (!config.maxTokens) {
+      config.maxTokens = 2048;
     }
 
     const messages = this.contextManager.buildPromptMessages(
@@ -199,10 +251,64 @@ export class AgentCore {
       onChunk(chunk);
     };
 
+    const normalizedUserMsg = normalizeVoiceInput(userMessage);
+
     const allDefs = this.toolRegistry.getAllDefinitions();
-    const streamToolDefs = (config.toolsEnabled === false || isConversational)
+    let streamToolDefs = (config.toolsEnabled === false)
       ? []
-      : selectRelevantTools(userMessage, allDefs, config.modelProvider);
+      : selectRelevantTools(normalizedUserMsg, allDefs, config.modelProvider);
+
+    // 1. Ultra-Fast Weather Prefetch: Fetch live Open-Meteo meteorological reports in ~200ms
+    const isWeatherQuery = streamToolDefs.some(t => t.name === 'predict_weather' || t.name === 'get_weather') ||
+      /\b(weather|wether|forecast|temperature|temprature|rain|raining|snow|sunny|humidity)\b/i.test(normalizedUserMsg);
+
+    if (isWeatherQuery) {
+      const loc = extractWeatherLocation(normalizedUserMsg) ||
+        this.memoryStore.getPreference('location') ||
+        this.memoryStore.getPreference('city') ||
+        'Paris';
+      try {
+        const weatherRes = await this.toolRegistry.execute('predict_weather', { location: loc, days: 3 });
+        if (weatherRes.success && weatherRes.message) {
+          messages.push({
+            role: 'tool',
+            content: weatherRes.message,
+            toolCallId: 'call_weather_' + Date.now(),
+            toolResult: weatherRes
+          });
+          // Weather forecast is embedded as ground truth; stream spoken synthesis directly!
+          streamToolDefs = [];
+        }
+      } catch (e: any) {
+        console.warn('[AGENT CORE] Weather prefetch notice:', e.message);
+      }
+    }
+
+    // 2. Ultra-Fast Live Augmentation: If query asks for live news, current events, or search,
+    // pre-fetch real-time web facts in ~500ms so the streaming LLM answers immediately in <2s!
+    const isLiveSearchQuery = !isWeatherQuery && streamToolDefs.some(t => t.name === 'web_search') && (
+      /\b(news|latest|today|current|recent|who is|who won|score|winner|what happened|stock|price|election|super bowl|championship)\b/i.test(normalizedUserMsg) ||
+      normalizedUserMsg.toLowerCase().includes('search') ||
+      normalizedUserMsg.toLowerCase().includes('online')
+    );
+
+    if (isLiveSearchQuery) {
+      try {
+        const searchRes = await this.toolRegistry.execute('web_search', { query: normalizedUserMsg });
+        if (searchRes.success && searchRes.message) {
+          messages.push({
+            role: 'tool',
+            content: searchRes.message,
+            toolCallId: 'call_live_' + Date.now(),
+            toolResult: searchRes
+          });
+          // Live search results are embedded; stream directly with no tool overhead!
+          streamToolDefs = [];
+        }
+      } catch (e: any) {
+        console.warn('[AGENT CORE] Live search prefetch notice:', e.message);
+      }
+    }
 
     let res: { response: AgentMessage; providerUsed: string };
     try {
@@ -213,6 +319,44 @@ export class AgentCore {
         chunkCollector,
         signal
       );
+
+      // If the model invoked tools (e.g. web_search, weather, notes, tasks), execute them and stream final synthesis
+      if (res.response?.toolCalls && res.response.toolCalls.length > 0) {
+        const toolsExecuted: Array<{ name: string; parameters: any; result: any }> = [];
+        for (const tc of res.response.toolCalls) {
+          const result = await this.toolRegistry.execute(tc.name, tc.arguments);
+          toolsExecuted.push({ name: tc.name, parameters: tc.arguments, result });
+
+          messages.push({
+            role: 'assistant',
+            content: res.response.content || '',
+            toolCalls: [tc]
+          });
+
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify(result.data || result.message),
+            toolCallId: tc.id,
+            toolResult: result
+          });
+        }
+
+        // Now stream the synthesized answer with tool results embedded
+        const synthConfig = { ...config, toolsEnabled: false };
+        try {
+          res = await this.providerManager.generateResponseStream(
+            messages,
+            [],
+            synthConfig,
+            chunkCollector,
+            signal
+          );
+        } catch (synthErr: any) {
+          const fallbackText = synthesizeToolResults(toolsExecuted);
+          chunkCollector(fallbackText);
+          res = { response: { role: 'assistant', content: fallbackText }, providerUsed: res.providerUsed };
+        }
+      }
     } catch (err: any) {
       const partial = fullResponse.trim();
       const content = partial || 'Answer interrupted, no reply produced.';
@@ -291,10 +435,7 @@ export class AgentCore {
     );
 
     const isChatMode = config.mode === 'chat' || config.mode === 'conversational';
-    const maxIterations = isChatMode ? 1 : (config.maxToolIterations || 3);
-    if (isChatMode) {
-      config.toolsEnabled = false;
-    }
+    const maxIterations = isChatMode ? 2 : (config.maxToolIterations || 3);
     // Guard against acoustic microphone self-echo looping into chat
     const lastAssistant = [...this.conversationHistory].reverse().find(m => m.role === 'assistant');
     if (lastAssistant && lastAssistant.content.trim() && userMessage.trim().length > 12) {
@@ -336,7 +477,7 @@ export class AgentCore {
         const allDefs = this.toolRegistry.getAllDefinitions();
         let toolDefs = (config.toolsEnabled === false || isChatMode)
           ? []
-          : selectRelevantTools(userMessage, allDefs, config.modelProvider);
+          : selectRelevantTools(normalizeVoiceInput(userMessage), allDefs, config.modelProvider);
 
         if (iteration > 1 && toolsExecuted.length > 0) {
           toolDefs = [];

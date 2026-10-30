@@ -65,7 +65,7 @@ export default function App() {
     return (
       <Suspense fallback={
         <div className="min-h-screen bg-[#0B0D12] flex items-center justify-center">
-          <div className="text-[#6E8BFF] text-sm animate-pulse">Loading admin panel...</div>
+          <div className="text-[#A78BFA] text-sm animate-pulse">Loading admin panel...</div>
         </div>
       }>
         <AdminPanel onBack={() => {
@@ -228,7 +228,7 @@ function MainApp() {
         <Loader
           containerStyles={{ background: '#0B0D12', zIndex: 60 }}
           innerStyles={{ width: '240px', backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: '9999px' }}
-          barStyles={{ background: '#6E8BFF', borderRadius: '9999px' }}
+          barStyles={{ background: '#A78BFA', borderRadius: '9999px' }}
           dataStyles={{ color: '#F2F2F2', fontSize: '13px', fontWeight: '400', fontFamily: 'Inter, sans-serif' }}
           dataInterpolation={(p) => `Loading... ${p.toFixed(0)}%`}
         />
