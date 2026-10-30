@@ -1,6 +1,8 @@
 import { IAIProvider } from './IAIProvider';
-import { AgentMessage, ToolDefinition, AgentConfig, ProviderResponse } from '../types';
+import { AgentMessage, ToolDefinition, AgentConfig, ProviderResponse, ToolResult } from '../types';
 import { LangGraphOrchestrator } from '../langgraph/LangGraphOrchestrator';
+import { ToolRegistry } from '../tools/ToolRegistry';
+import { PermissionManager } from '../permissions/PermissionManager';
 
 /**
  * LangGraphProvider — wires the full multi-node graph orchestrator
@@ -10,9 +12,13 @@ import { LangGraphOrchestrator } from '../langgraph/LangGraphOrchestrator';
  */
 export class LangGraphProvider implements IAIProvider {
   private orchestrator: LangGraphOrchestrator;
+  private toolRegistry?: ToolRegistry;
+  private permissionManager?: PermissionManager;
 
-  constructor() {
+  constructor(toolRegistry?: ToolRegistry, permissionManager?: PermissionManager) {
     this.orchestrator = new LangGraphOrchestrator();
+    this.toolRegistry = toolRegistry;
+    this.permissionManager = permissionManager;
   }
 
   getName(): string {
@@ -55,7 +61,41 @@ export class LangGraphProvider implements IAIProvider {
       history,
       tools,
       config,
-      async (_name, _args) => ({ success: false, message: 'Tool not available in this context' })
+      async (name: string, args: Record<string, any>): Promise<ToolResult> => {
+        // Architectural Decision - No Double Execution:
+        // LangGraphProvider executes tools internally within its graph orchestrator loop
+        // and synthesizes the results directly into the final spoken content response.
+        // It returns { content } with NO toolCalls so that AgentCore does not re-execute the same tools.
+
+        if (!this.toolRegistry) {
+          return { success: false, message: 'Tool registry not available in this context' };
+        }
+
+        // 1. Tool name MUST be in the tools[] list passed to generateResponse()
+        const isAllowed = tools.some(t => t.name === name);
+        if (!isAllowed) {
+          return { success: false, message: `Tool not allowed for this request: ${name}` };
+        }
+
+        // 2. Look up the tool definition. If it does not exist, return the registry's unknown-tool failure
+        const toolHandler = this.toolRegistry.getTool(name);
+        if (!toolHandler) {
+          return await this.toolRegistry.execute(name, args);
+        }
+        const definition = toolHandler.definition;
+
+        // 3. If PermissionManager.requiresConfirmation(definition) is true, DO NOT EXECUTE IT
+        const needsConfirmation = this.permissionManager
+          ? this.permissionManager.requiresConfirmation(definition)
+          : (definition.permission === 'DESTRUCTIVE' || definition.permission === 'SYSTEM');
+
+        if (needsConfirmation) {
+          return { success: false, message: `Tool ${name} requires user confirmation and was not executed.` };
+        }
+
+        // 4. Otherwise, execute it via the registry and return its real result, success or failure, unchanged
+        return await this.toolRegistry.execute(name, args);
+      }
     );
 
     return { content: result.response };

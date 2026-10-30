@@ -34,7 +34,7 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
     'my cpu', 'cpu usage', 'my ram', 'ram usage', 'system memory', 'memory usage',
     'my computer specs', 'pc specs', 'system specs', 'computer specs', 'hardware specs',
     'system info', 'about this pc', 'about this computer', 'host specs',
-    'open calculator', 'launch calculator', 'run terminal command', 'execute command in powershell'
+    'open calculator', 'launch calculator', 'run terminal command', 'execute command in powershell', 'run command', 'system command', 'terminal command'
   ];
   const taskKeywords = ['add task', 'list tasks', 'todo', 'to-do', 'complete task', 'add note', 'list notes', 'delete note'];
   const memoryKeywords = ['remember that', 'remember my', 'recall my', 'what did i tell you', 'my favorite'];
@@ -53,7 +53,7 @@ function selectRelevantTools(userMessage: string, allTools: ToolDefinition[], pr
   const matchedTools = new Set<string>();
 
   if (fileKeywords.some(kw => lower.includes(kw))) {
-    ['list_files', 'read_file', 'search_files', 'create_file', 'read_document', 'open_folder'].forEach(t => matchedTools.add(t));
+    ['list_files', 'read_file', 'search_files', 'create_file', 'delete_file', 'read_document', 'open_folder'].forEach(t => matchedTools.add(t));
   }
   if (sysKeywords.some(kw => lower.includes(kw))) {
     ['check_resources', 'get_system_info', 'open_application', 'run_command'].forEach(t => matchedTools.add(t));
@@ -124,7 +124,7 @@ export class AgentCore {
     registerWebTools(this.toolRegistry);
     registerWeatherTools(this.toolRegistry);
 
-    this.providerManager = new ProviderManager();
+    this.providerManager = new ProviderManager(process.env.MODEL_PROVIDER || 'auto', this.toolRegistry, this.permissionManager);
   }
 
   getToolRegistry(): ToolRegistry {

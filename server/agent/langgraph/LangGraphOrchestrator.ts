@@ -112,6 +112,12 @@ export async function nodeClassify(state: GraphState, key: string): Promise<Part
     return { intent: 'greeting', complexity: 'low' };
   }
 
+  // Explicit action/task commands should always be classified as task
+  const actionKeywords = ['add task', 'create task', 'new task', 'add note', 'create note', 'delete file', 'run command', 'set reminder'];
+  if (actionKeywords.some(k => lower.includes(k))) {
+    return { intent: 'task', complexity: 'medium' };
+  }
+
   const realtimeKeywords = ['news', 'today', 'latest', 'current', 'happening', 'weather', 'forecast', 'stock', 'price', 'bitcoin', 'election', 'score', 'live', 'breaking'];
   if (realtimeKeywords.some(k => lower.includes(k))) {
     return { intent: 'realtime', complexity: 'medium' };
@@ -226,9 +232,11 @@ export async function nodeSynthesize(state: GraphState, key: string): Promise<Pa
   // Build tool context if tools were used
   let toolContext = '';
   if (toolResults.length > 0) {
-    toolContext = '\n\nTool Execution Results:\n' + toolResults.map(t =>
-      `[${t.toolName}]: ${JSON.stringify(t.result.data || t.result.message)}`
-    ).join('\n');
+    toolContext = '\n\nTool Execution Results:\n' + toolResults.map(t => {
+      const payload = t.result.data !== undefined ? t.result.data : (t.result.message || t.result.error);
+      const status = t.result.success ? 'SUCCESS' : 'FAILED/BLOCKED';
+      return `[${t.toolName}] (${status}): ${JSON.stringify(payload)}`;
+    }).join('\n');
   }
 
   // Build thinking context
@@ -242,6 +250,9 @@ export async function nodeSynthesize(state: GraphState, key: string): Promise<Pa
 SYNTHESIS INSTRUCTIONS:
 - Produce an articulate, highly engaging, and natural spoken response — every word will be read aloud by a voice synthesizer
 - NEVER use markdown symbols (*, #, _, ~, backticks, bullets, or headers) so speech is crystal clear
+- If tool execution results are provided below, they represent ground truth:
+  • If a tool succeeded, incorporate its actual data or message into your spoken response.
+  • If a tool execution was FAILED or BLOCKED (e.g. requires user confirmation, permission required, or error), you MUST state clearly and honestly that the action was NOT performed and explain that user confirmation is required or why it did not run. NEVER claim that an action succeeded or invent fake data when a tool failed or was blocked.
 - If answering a reasoning, math, logic, or complex question:
   1. Clearly state the exact correct answer in the opening sentence.
   2. Walk through the clear, intuitive step-by-step proof so the listener understands completely.
@@ -365,14 +376,33 @@ export class LangGraphOrchestrator {
       const relevantTools = selectGraphTools(userMessage, tools, state.intent);
 
       for (const tool of relevantTools.slice(0, 3)) {
+        const args = inferToolArgs(userMessage, tool.name);
+        const safeArgs = sanitizeArgsForLogging(args);
         try {
-          const args = inferToolArgs(userMessage, tool.name);
           const result = await executeToolFn(tool.name, args);
-          if (result.success) {
-            toolResults.push({ toolName: tool.name, args, result });
-          }
-        } catch {
-          // Tool execution failure is silent — synthesizer handles it
+          console.log(`[LangGraph Tool] ${tool.name} (success: ${result.success}):`, {
+            args: safeArgs,
+            success: result.success,
+            message: result.message,
+            error: result.error
+          });
+          toolResults.push({ toolName: tool.name, args, result });
+        } catch (err: any) {
+          const errorMsg = err?.message || String(err);
+          console.error(`[LangGraph Tool] ${tool.name} execution error:`, {
+            args: safeArgs,
+            success: false,
+            error: errorMsg
+          });
+          toolResults.push({
+            toolName: tool.name,
+            args,
+            result: {
+              success: false,
+              error: errorMsg,
+              message: `Execution failed for ${tool.name}: ${errorMsg}`
+            }
+          });
         }
       }
       state = { ...state, toolResults };
@@ -408,14 +438,56 @@ export class LangGraphOrchestrator {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function sanitizeArgsForLogging(args: Record<string, any>): Record<string, any> {
+  const sanitized: Record<string, any> = {};
+  for (const [key, val] of Object.entries(args)) {
+    if (/key|secret|token|password|auth|credential/i.test(key)) {
+      sanitized[key] = '[REDACTED]';
+    } else {
+      sanitized[key] = val;
+    }
+  }
+  return sanitized;
+}
+
 function selectGraphTools(userMessage: string, tools: ToolDefinition[], intent: IntentClass): ToolDefinition[] {
   const lower = userMessage.toLowerCase();
+
+  // If specific destructive / system operations are requested, prioritize them
+  if (lower.includes('delete') && (lower.includes('file') || lower.includes('path') || lower.includes('.txt') || lower.includes('.'))) {
+    const delTool = tools.find(t => t.name === 'delete_file');
+    if (delTool) return [delTool];
+  }
+  if (lower.includes('command') || lower.includes('terminal') || lower.includes('powershell') || lower.includes('exec')) {
+    const cmdTool = tools.find(t => t.name === 'run_command');
+    if (cmdTool) return [cmdTool];
+  }
+
+  // If specific task or note operations are requested, prioritize them
+  if (lower.includes('add task') || lower.includes('create task') || lower.includes('new task') || lower.includes('task:')) {
+    const taskTool = tools.find(t => t.name === 'add_task');
+    if (taskTool) return [taskTool];
+  }
+  if (lower.includes('add note') || lower.includes('create note') || lower.includes('new note') || lower.includes('note:')) {
+    const noteTool = tools.find(t => t.name === 'add_note');
+    if (noteTool) return [noteTool];
+  }
+  if (lower.includes('read file') || lower.includes('cat ') || lower.includes('read the file')) {
+    const readTool = tools.find(t => t.name === 'read_file');
+    if (readTool) return [readTool];
+  }
 
   if (intent === 'realtime') {
     return tools.filter(t => t.name === 'web_search' || t.name === 'fetch_webpage' || t.name === 'predict_weather');
   }
   if (intent === 'task') {
-    return tools.filter(t => ['add_task', 'list_tasks', 'add_note', 'list_notes', 'remember_info', 'recall_info', 'list_files', 'check_resources'].includes(t.name));
+    return tools.filter(t => [
+      'add_task', 'list_tasks', 'complete_task',
+      'add_note', 'list_notes', 'delete_note',
+      'remember_info', 'recall_info',
+      'list_files', 'read_file', 'create_file', 'delete_file',
+      'check_resources', 'run_command'
+    ].includes(t.name));
   }
   const weatherWords = ['weather', 'forecast', 'rain', 'temperature', 'sunny', 'cloudy'];
   if (weatherWords.some(w => lower.includes(w))) {
@@ -440,12 +512,24 @@ function inferToolArgs(userMessage: string, toolName: string): Record<string, an
       return { location: cityMatch?.[1]?.trim() || 'current location' };
     }
     case 'add_task': {
-      const taskMatch = userMessage.match(/(?:add task|remind me to|task:?)\s+(.+)/i);
+      const taskMatch = userMessage.match(/(?:add task|create task|remind me to|task:?)\s*(?::\s*)?(.+)/i);
       return { title: taskMatch?.[1]?.trim() || userMessage, priority: 'medium' };
     }
     case 'add_note': {
       const noteMatch = userMessage.match(/(?:note|remember):?\s*(.+)/i);
       return { title: 'Quick Note', content: noteMatch?.[1]?.trim() || userMessage };
+    }
+    case 'read_file': {
+      const fileMatch = userMessage.match(/(?:read|cat|view|open)\s+(?:the\s+)?(?:file\s+)?([^\s'"]+)/i);
+      return { filePath: fileMatch?.[1]?.trim() || 'test.txt' };
+    }
+    case 'delete_file': {
+      const fileMatch = userMessage.match(/(?:delete|remove)\s+(?:the\s+)?(?:file\s+)?([^\s'"]+)/i);
+      return { filePath: fileMatch?.[1]?.trim() || 'test.txt' };
+    }
+    case 'run_command': {
+      const cmdMatch = userMessage.match(/(?:run|execute)\s+(?:a\s+)?(?:the\s+)?(?:system\s+)?(?:terminal\s+)?(?:command\s+)?(.+)/i);
+      return { command: cmdMatch?.[1]?.trim() || 'echo test' };
     }
     case 'list_files':
       return { path: '.', recursive: false };

@@ -5,18 +5,47 @@ import { LangGraphProvider } from './LangGraphProvider';
 import { LocalModelProvider } from './LocalModelProvider';
 import { FallbackLocalProvider } from './FallbackLocalProvider';
 import { AgentConfig, AgentMessage, ToolDefinition, ProviderResponse } from '../types';
+import { ToolRegistry } from '../tools/ToolRegistry';
+import { PermissionManager } from '../permissions/PermissionManager';
 
 export class ProviderManager {
   private providers: Map<string, IAIProvider> = new Map();
   private defaultProviderName: string;
+  private toolRegistry?: ToolRegistry;
+  private permissionManager?: PermissionManager;
 
-  constructor(defaultProviderName = process.env.MODEL_PROVIDER || 'auto') {
+  constructor(
+    defaultProviderOrRegistry?: string | ToolRegistry,
+    toolRegistryOrPerm?: ToolRegistry | PermissionManager,
+    permissionManager?: PermissionManager
+  ) {
+    let defaultProviderName = process.env.MODEL_PROVIDER || 'auto';
+    let registry: ToolRegistry | undefined;
+    let permManager: PermissionManager | undefined;
+
+    if (typeof defaultProviderOrRegistry === 'string') {
+      defaultProviderName = defaultProviderOrRegistry;
+      if (toolRegistryOrPerm instanceof ToolRegistry) {
+        registry = toolRegistryOrPerm;
+        permManager = permissionManager;
+      } else if (toolRegistryOrPerm) {
+        permManager = toolRegistryOrPerm as PermissionManager;
+      }
+    } else if (defaultProviderOrRegistry instanceof ToolRegistry) {
+      registry = defaultProviderOrRegistry;
+      if (toolRegistryOrPerm && 'requiresConfirmation' in toolRegistryOrPerm) {
+        permManager = toolRegistryOrPerm as PermissionManager;
+      }
+    }
+
     this.defaultProviderName = defaultProviderName;
+    this.toolRegistry = registry;
+    this.permissionManager = permManager;
 
     // Register supported providers
     this.registerProvider(new GeminiProvider());
     this.registerProvider(new GrokProvider());
-    this.registerProvider(new LangGraphProvider());
+    this.registerProvider(new LangGraphProvider(this.toolRegistry, this.permissionManager));
     this.registerProvider(new LocalModelProvider());
     this.registerProvider(new FallbackLocalProvider());
   }
