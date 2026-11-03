@@ -200,7 +200,7 @@ function MainApp() {
             <button
               type="button"
               onClick={() => handleOpenTab('settings')}
-              className={`h-9 px-4 rounded-[18px] border text-xs font-medium transition active:scale-95 ${
+              className={`h-9 px-4 rounded-[18px] border text-xs font-medium transition active:scale-95 cursor-pointer ${
                 activeNavTab === 'settings' && !isControlPanelCollapsed
                   ? 'bg-[#8B7CFF] border-[#8B7CFF] text-[#FFFFFF] shadow-[0_2px_12px_rgba(139,124,255,0.35)]'
                   : 'bg-[#1A1D27] hover:bg-[#232733] border-[#2A2E3B] hover:border-[#8B7CFF]/50 text-[#C9CBD3] hover:text-[#FFFFFF]'

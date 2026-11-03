@@ -243,7 +243,7 @@ class VoicePlaybackManager {
         }
       }
       const streamUrl = `/api/tts-stream?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}`;
-      const res = await fetch(streamUrl);
+      const res = await fetch(streamUrl, { signal: AbortSignal.timeout(3500) });
       if (res.ok) {
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -509,15 +509,15 @@ class VoicePlaybackManager {
         audio.removeEventListener('error', onError);
       };
 
-      // Network buffering guard: 25000ms timeout
+      // Fast buffering guard: 4000ms timeout
       const timeoutTimer = setTimeout(() => {
         if (!settled) {
           settled = true;
           cleanup();
           this.hardStopAudio();
-          reject(new Error('Audio stream buffering timeout exceeded (>25000ms)'));
+          reject(new Error('Audio stream buffering timeout exceeded (>4000ms)'));
         }
-      }, 25000);
+      }, 4000);
 
       audio.addEventListener('playing', onPlaying);
       audio.addEventListener('timeupdate', onTimeUpdate);
@@ -576,10 +576,17 @@ class VoicePlaybackManager {
       store.setAudioUrl(null);
       store.setPlaybackState('idle');
       store.setIsSpeaking(false);
-      // Strictly prevent fallback to default browser system voice (speechSynthesis)
-      // Keep character locked exclusively to Lily voice pack
       if (err?.message) {
-        store.setError(`Lily voice notice: ${err.message}`);
+        store.setError(`Voice notice: ${err.message}`);
+      }
+
+      // CRITICAL: Always invoke sentence completion callbacks so streaming conversation pipeline never freezes
+      if (this.currentSentenceEndCallback) {
+        const cb = this.currentSentenceEndCallback;
+        this.currentSentenceEndCallback = null;
+        cb();
+      } else if (this.onPlaybackEndCallback) {
+        this.onPlaybackEndCallback();
       }
     }
   }

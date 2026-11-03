@@ -7,9 +7,10 @@ import {
 } from './webSpeechService';
 import { voiceManager } from './voiceManager';
 import { sendAgentMessage, streamAgentConversation } from './agentService';
+import { pythonBackendService } from './pythonBackendService';
 import { detectEmotion } from './emotionDetector';
 import { getSpeechCompletionDelay } from '@/utils/speechCompletionDelay';
-import { isComplexReasoning } from '@/utils/reasoningDetector';
+import { isComplexReasoning, isWebSearchQuery } from '@/utils/reasoningDetector';
 import type { AuraConversationState } from '@/types';
 
 const INACTIVITY_TIMEOUT_MS = 60_000;
@@ -59,6 +60,7 @@ class AuraConversationController {
   private speechCooldownUntil = 0;
   private lastSpokenAnswer = '';
   private intentionallyStopped = false;
+  private activeRequestId: string | null = null;
 
   private get store() {
     return useAppStore.getState();
@@ -88,15 +90,28 @@ class AuraConversationController {
     window.addEventListener('studio-ask-agent', handleAsk);
     window.addEventListener('studio-toggle-mic', handleToggle);
     window.addEventListener('studio-stop-conversation', handleStop);
-    window.addEventListener('session-switch', () => {
+    window.addEventListener('session-switch', (e: any) => {
       this.streamAbort?.abort();
+      if (this.activeRequestId) {
+        pythonBackendService.cancel(this.activeRequestId);
+        this.activeRequestId = null;
+      }
       voiceManager.stopAll('session_switch');
       this.isProcessingOrSpeaking = false;
       this.store.setIsSpeaking(false);
       this.store.setPlaybackState('idle');
       this.store.setAgentStatus('idle');
       this.setState('sleeping');
+
+      const targetId = e?.detail?.newSessionId;
+      if (targetId) {
+        pythonBackendService.connect(targetId);
+      }
     });
+
+    // Pre-warm Python backend connection for active session
+    const initialSessionId = useSessionStore.getState().activeSessionId || 'session_default_general';
+    pythonBackendService.connect(initialSessionId);
 
     // If Always-On Mic was previously enabled, auto-start on first user interaction
     if (this.store.isAlwaysOnMic) {
@@ -111,6 +126,11 @@ class AuraConversationController {
     this.stopActiveRecognizer();
     this.clearTimers();
     this.streamAbort?.abort();
+    if (this.activeRequestId) {
+      pythonBackendService.cancel(this.activeRequestId);
+      this.activeRequestId = null;
+    }
+    pythonBackendService.disconnect();
     voiceManager.stopAll('aura_destroy');
     this.initialized = false;
   }
@@ -175,6 +195,10 @@ class AuraConversationController {
     this.speechCooldownUntil = Date.now() + 400;
     voiceManager.stopAll('user_stop');
     this.streamAbort?.abort();
+    if (this.activeRequestId) {
+      pythonBackendService.cancel(this.activeRequestId);
+      this.activeRequestId = null;
+    }
     this.stopActiveRecognizer();
     this.clearTimers();
     voiceManager.setOnPlaybackEnd(null);
@@ -329,19 +353,13 @@ class AuraConversationController {
     this.accumulated = '';
     this.store.setIsListening(false);
 
-    // Auto-switch to Deep Think ONLY for explicit complex multi-step reasoning requests
+    // Deep Think mode is always active for high quality, with fast 1-2s response for conversation
     const isReasoning = isComplexReasoning(trimmed);
-    const providerToSend = isReasoning
-      ? 'langgraph'
-      : (this.store.agentSpeed === 'instant' ? 'local_fallback' : (this.store.agentSpeed || 'gemini'));
+    const isWebSearch = isWebSearchQuery(trimmed);
+    const providerToSend = 'langgraph';
 
-    if (isReasoning) {
-      this.store.setAgentModelName('Deep Think');
-      this.store.setAgentSpeed('langgraph');
-    } else if (this.store.agentSpeed !== 'langgraph' && this.store.agentSpeed !== 'instant') {
-      this.store.setAgentModelName('Balanced');
-      this.store.setAgentSpeed('gemini');
-    }
+    this.store.setAgentModelName('Deep Think');
+    this.store.setAgentSpeed('langgraph');
 
     voiceManager.setOnPlaybackEnd(null);
 
@@ -365,7 +383,11 @@ class AuraConversationController {
     this.store.setAgentStatus('thinking');
     this.store.setPlaybackState('loading');
     this.store.setError(null);
-    this.store.setCurrentAgentAction('Thinking & analyzing query...');
+    this.store.setCurrentAgentAction(
+      isWebSearch
+        ? 'Deep Think: Searching web & analyzing...'
+        : 'Deep Think: Formulating response...'
+    );
     this.store.setSpeechText('');
     this.store.setCurrentSentence('');
 
@@ -373,14 +395,46 @@ class AuraConversationController {
     let accumulatedText = '';
     let hasStartedSpeaking = false;
 
+    // Safety watchdog: Recover state if no backend response is received within 15 seconds
+    let watchdogTimer: any = setTimeout(() => {
+      if (this.isProcessingOrSpeaking && this.store.agentStatus === 'thinking') {
+        console.warn('[Aura] Watchdog: No response received within 15s. Resetting state.');
+        if (this.activeRequestId) {
+          pythonBackendService.cancel(this.activeRequestId);
+          this.activeRequestId = null;
+        }
+        voiceManager.stopAll('watchdog_timeout');
+        this.isProcessingOrSpeaking = false;
+        this.store.setAgentStatus('idle');
+        this.store.setPlaybackState('idle');
+        this.setState('sleeping');
+        this.store.setCurrentAgentAction(null);
+        this.store.setError('I took too long to get an answer. Please try asking again.');
+        setTimeout(() => this.store.setError(null), 3500);
+      }
+    }, 15000);
+
+    const clearWatchdog = () => {
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+    };
+
     // 3. Start streaming sentence queue in voiceManager
     voiceManager.startStreamSession(() => {
       this.onResponseComplete();
     });
 
+    if (this.activeRequestId) {
+      pythonBackendService.cancel(this.activeRequestId);
+      this.activeRequestId = null;
+    }
+
     try {
-      await streamAgentConversation(
+      this.activeRequestId = pythonBackendService.sendMessage(
         trimmed,
+        currentSessionId || 'session_default_general',
         {
           mode: this.store.agentModeType,
           modelProvider: providerToSend,
@@ -388,6 +442,7 @@ class AuraConversationController {
         },
         {
           onSentence: (sentence: string) => {
+            clearWatchdog();
             if (abortSignal.aborted) return;
             const cleaned = cleanTextForSpeech(sentence);
             if (cleaned.length > 0) {
@@ -396,12 +451,16 @@ class AuraConversationController {
                 this.setState('speaking');
                 this.store.setAgentStatus('speaking');
               }
+              // Immediately illuminate the teleprompter subtitle capsule with the answer
+              this.store.setSpeechText(cleaned);
+              this.store.setCurrentSentence(cleaned);
               voiceManager.enqueueSentence(cleaned);
             }
           },
           onChunk: (chunk: string) => {
+            clearWatchdog();
             if (abortSignal.aborted) return;
-            accumulatedText += chunk;
+            accumulatedText += (accumulatedText ? ' ' : '') + chunk;
             if (currentSessionId && accumulatedText.trim()) {
               useSessionStore.getState().appendLocalMessage({
                 id: assistantMsgId,
@@ -414,8 +473,10 @@ class AuraConversationController {
               });
             }
           },
-          onComplete: (fullResponse: string, modelUsed: string, respSessionId?: string) => {
+          onDone: (fullResponse: string, modelUsed: string, respSessionId?: string) => {
+            clearWatchdog();
             if (abortSignal.aborted) return;
+            this.activeRequestId = null;
             voiceManager.notifyStreamDone();
 
             const finalContent = fullResponse?.trim() || accumulatedText.trim();
@@ -438,16 +499,13 @@ class AuraConversationController {
             this.store.setLastFullResponse(finalContent);
             this.store.setCurrentEmotion(detectEmotion(finalContent));
 
-            if (modelUsed?.toLowerCase().includes('langgraph') || isReasoning) {
-              this.store.setAgentModelName('Deep Think');
-              this.store.setAgentSpeed('langgraph');
-            } else if (this.store.agentSpeed !== 'langgraph' && this.store.agentSpeed !== 'instant') {
-              this.store.setAgentModelName('Balanced');
-              this.store.setAgentSpeed('gemini');
-            }
+            this.store.setAgentModelName('Deep Think');
+            this.store.setAgentSpeed('langgraph');
           },
           onError: (err: Error) => {
+            clearWatchdog();
             if (abortSignal.aborted) return;
+            this.activeRequestId = null;
             console.error('[Aura] Streaming conversation error:', err);
             voiceManager.stopAll('stream_error');
             this.isProcessingOrSpeaking = false;
@@ -457,12 +515,21 @@ class AuraConversationController {
               this.store.setAgentStatus('idle');
               this.setState('sleeping');
             }, 2000);
+          },
+          onToolStart: (toolName: string) => {
+            clearWatchdog();
+            if (abortSignal.aborted) return;
+            this.store.setCurrentAgentAction(`Deep Think: Running ${toolName}...`);
+          },
+          onToolEnd: () => {
+            clearWatchdog();
+            if (abortSignal.aborted) return;
+            this.store.setCurrentAgentAction('Deep Think: Synthesizing answer...');
           }
-        },
-        abortSignal,
-        currentSessionId || undefined
+        }
       );
     } catch (err: any) {
+      clearWatchdog();
       if (abortSignal.aborted) return;
       console.error('[Aura] processQuery error:', err);
       voiceManager.stopAll('query_error');

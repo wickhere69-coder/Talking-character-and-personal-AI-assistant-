@@ -47,15 +47,9 @@ export default function ConversationBar() {
     setInputText('');
     setScriptText('');
 
-    // Auto-switch to Deep Think for complex queries
-    const requiresDeepReasoning = isComplexReasoning(trimmed);
-    if (requiresDeepReasoning) {
-      setAgentModelName('Deep Think');
-      setAgentSpeed('langgraph');
-    } else if (agentSpeed !== 'langgraph' && agentSpeed !== 'instant') {
-      setAgentModelName('Balanced');
-      setAgentSpeed('gemini');
-    }
+    // Always maintain Deep Think mode for highest quality intelligence
+    setAgentModelName('Deep Think');
+    setAgentSpeed('langgraph');
 
     auraController.ask(trimmed);
   };
@@ -111,7 +105,7 @@ export default function ConversationBar() {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="w-9 h-9 rounded-full bg-[#262A38] hover:bg-[#32374A] text-[#FFFFFF] transition flex items-center justify-center shrink-0 active:scale-95"
+          className="w-9 h-9 rounded-full bg-[#262A38] hover:bg-[#32374A] text-[#FFFFFF] transition flex items-center justify-center shrink-0 active:scale-95 cursor-pointer"
           title="Attach file or 3D model"
         >
           <Plus size={18} strokeWidth={2.5} />
@@ -136,7 +130,7 @@ export default function ConversationBar() {
             <button
               type="button"
               onClick={() => auraController.stopConversation()}
-              className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 flex items-center justify-center transition active:scale-95 shrink-0 border border-rose-500/30"
+              className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 flex items-center justify-center transition active:scale-95 shrink-0 border border-rose-500/30 cursor-pointer"
               title="Stop speaking"
             >
               <Square size={12} strokeWidth={2.5} fill="currentColor" />
@@ -145,7 +139,7 @@ export default function ConversationBar() {
             <button
               type="button"
               onClick={handleToggleMic}
-              className={`w-9 h-9 rounded-full flex items-center justify-center transition active:scale-95 shrink-0 relative ${
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition active:scale-95 shrink-0 relative cursor-pointer ${
                 isListening
                   ? 'bg-[#8B7CFF] text-white shadow-[0_0_12px_rgba(139,124,255,0.6)]'
                   : isAlwaysOnMic
@@ -172,7 +166,7 @@ export default function ConversationBar() {
             type="button"
             onClick={() => handleSend(inputText || scriptText)}
             disabled={(!inputText.trim() && !(isListening && scriptText.trim())) || isBusy}
-            className="w-10 h-10 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center shadow-[0_2px_12px_rgba(139,124,255,0.4)] text-[#FFFFFF] font-bold shrink-0"
+            className="w-10 h-10 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center shadow-[0_2px_12px_rgba(139,124,255,0.4)] text-[#FFFFFF] font-bold shrink-0 cursor-pointer"
             title="Send message"
           >
             <ArrowRight size={18} strokeWidth={2.5} />

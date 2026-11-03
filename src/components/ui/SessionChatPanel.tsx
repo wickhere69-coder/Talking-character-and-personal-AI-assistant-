@@ -207,11 +207,21 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
           <button
             type="button"
             onClick={() => setIsMemoryInspectorOpen(true)}
-            className="px-3 py-1.5 rounded-[19px] bg-[#1A1D27] hover:bg-[#202431] border border-[#2A2E3B] text-[#C9CBD3] hover:text-[#FFFFFF] text-[11px] font-medium transition flex items-center gap-1.5 active:scale-95 shadow-sm"
+            className="px-3 py-1.5 rounded-[19px] bg-[#1A1D27] hover:bg-[#202431] border border-[#2A2E3B] text-[#C9CBD3] hover:text-[#FFFFFF] text-[11px] font-medium transition flex items-center gap-1.5 active:scale-95 shadow-sm cursor-pointer"
             title="Inspect Topic & Contextual Memory for this session"
           >
             <Brain size={13} strokeWidth={2} className="text-[#8B7CFF]" />
             <span>Memory</span>
+          </button>
+
+          {/* Direct Delete Session Button */}
+          <button
+            type="button"
+            onClick={() => setDeletingSession(session)}
+            className="p-2 rounded-full border border-[#2A2E3B] bg-[#1A1D27] hover:bg-rose-500/15 text-[#7A7D86] hover:text-rose-400 hover:border-rose-500/30 transition active:scale-95 cursor-pointer"
+            title="Delete this session"
+          >
+            <Trash2 size={14} />
           </button>
 
           {/* Single More Options Dropdown */}
@@ -341,7 +351,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                       key={i}
                       type="button"
                       onClick={() => auraController.ask(item.text)}
-                      className="group flex items-center gap-3 p-3 rounded-[14px] bg-[#1A1D27] hover:bg-[#202431] border border-[#2A2E3B] hover:border-[#8B7CFF]/50 text-left transition-all duration-200 active:scale-[0.99]"
+                      className="group flex items-center gap-3 p-3 rounded-[14px] bg-[#1A1D27] hover:bg-[#202431] border border-[#2A2E3B] hover:border-[#8B7CFF]/50 text-left transition-all duration-200 active:scale-[0.99] cursor-pointer"
                     >
                       <div className="w-7 h-7 rounded-lg bg-[#14161E] border border-[#23252F] flex items-center justify-center shrink-0 text-[#8B7CFF]">
                         <Icon size={14} />
@@ -428,7 +438,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             type="button"
             onClick={handleSend}
             disabled={!inputVal.trim() || isBusy}
-            className="w-8 h-8 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] disabled:opacity-40 text-white flex items-center justify-center transition active:scale-95"
+            className="w-8 h-8 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] disabled:opacity-40 text-white flex items-center justify-center transition active:scale-95 cursor-pointer disabled:cursor-not-allowed"
             title="Send"
           >
             <Send size={13} />

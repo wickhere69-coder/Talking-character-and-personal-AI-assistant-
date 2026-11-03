@@ -677,7 +677,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setIsCollapsed(true);
                   setStoreNavTab('home');
                 }}
-                className="w-8 h-8 rounded-full bg-[#1A1D27] border border-[#23252F] flex items-center justify-center text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-[#1A1D27] active:scale-95 transition shadow-sm"
+                className="w-8 h-8 rounded-full bg-[#1A1D27] border border-[#23252F] flex items-center justify-center text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-[#202431] active:scale-95 transition shadow-sm cursor-pointer"
                 title="Close Drawer"
               >
                 <X size={15} strokeWidth={1.75} />
@@ -695,8 +695,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setStoreNavTab('chat');
                   loadHistory();
                 }}
-                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'chat' ? 'bg-gradient-to-b from-[#F2F2F2] to-[#FFFFFF] text-[#FFFFFF] font-semibold shadow-sm'
+                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 cursor-pointer ${
+                  activeTab === 'chat' ? 'bg-[#8B7CFF] text-[#FFFFFF] font-semibold shadow-[0_2px_10px_rgba(139,124,255,0.35)]'
                     : 'text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
@@ -710,8 +710,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setActiveTab('voice');
                   setStoreNavTab('voice');
                 }}
-                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'voice' ? 'bg-gradient-to-b from-[#F2F2F2] to-[#FFFFFF] text-[#FFFFFF] font-semibold shadow-sm'
+                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 cursor-pointer ${
+                  activeTab === 'voice' ? 'bg-[#8B7CFF] text-[#FFFFFF] font-semibold shadow-[0_2px_10px_rgba(139,124,255,0.35)]'
                     : 'text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
@@ -725,8 +725,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setActiveTab('settings');
                   setStoreNavTab('settings');
                 }}
-                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'settings' ? 'bg-gradient-to-b from-[#F2F2F2] to-[#FFFFFF] text-[#FFFFFF] font-semibold shadow-sm'
+                className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 cursor-pointer ${
+                  activeTab === 'settings' ? 'bg-[#8B7CFF] text-[#FFFFFF] font-semibold shadow-[0_2px_10px_rgba(139,124,255,0.35)]'
                     : 'text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >

@@ -32,3 +32,28 @@ export function isComplexReasoning(prompt: string): boolean {
 
   return false;
 }
+
+/**
+ * Detects whether a query requires live web search or real-time internet knowledge
+ * (news, current events, scores, weather, stock prices, latest updates).
+ */
+export function isWebSearchQuery(prompt: string): boolean {
+  if (!prompt) return false;
+  const lower = prompt.toLowerCase().trim();
+
+  // Explicit search phrases
+  if (
+    lower.startsWith('search') ||
+    lower.startsWith('/search') ||
+    lower.includes('search the web') ||
+    lower.includes('look up') ||
+    lower.includes('find online') ||
+    lower.includes('google')
+  ) {
+    return true;
+  }
+
+  // Live real-time knowledge keywords
+  const liveKeywords = /\b(news|latest|today|current|recent|who is|who won|score|winner|what happened|stock price|election|super bowl|championship|weather)\b/i;
+  return liveKeywords.test(lower);
+}

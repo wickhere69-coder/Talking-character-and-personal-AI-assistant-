@@ -1,21 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
 import { Trash2, AlertTriangle, X } from 'lucide-react';
 import { BUTTONS } from './designSystem';
 
 export default function DeleteSessionModal() {
   const { deletingSession, setDeletingSession, confirmDeleteSession } = useSessionStore();
+  const [isDeleting, setIsDeleting] = useState(false);
 
   if (!deletingSession) return null;
 
   const handleDelete = async () => {
-    await confirmDeleteSession(deletingSession.id);
+    if (isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await confirmDeleteSession(deletingSession.id);
+    } finally {
+      setIsDeleting(false);
+      setDeletingSession(null);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in pointer-events-auto">
       <div 
-        className="relative w-full max-w-md bg-[#14161E]/95 border border-[#23252F] rounded-[24px] p-6 shadow-2xl overflow-hidden"
+        className="relative w-full max-w-md bg-[#14161E]/95 border border-[#23252F] rounded-[24px] p-6 shadow-2xl overflow-hidden pointer-events-auto"
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-session-title"
@@ -31,7 +39,7 @@ export default function DeleteSessionModal() {
           <button
             type="button"
             onClick={() => setDeletingSession(null)}
-            className="w-8 h-8 rounded-full bg-[#1A1D27] hover:bg-[#202431] text-[#7A7D86] hover:text-[#F2F2F2] flex items-center justify-center transition active:scale-95 border border-[#23252F]"
+            className="w-8 h-8 rounded-full bg-[#1A1D27] hover:bg-[#202431] text-[#7A7D86] hover:text-[#F2F2F2] flex items-center justify-center transition active:scale-95 border border-[#23252F] cursor-pointer"
             title="Cancel"
           >
             <X size={16} />
@@ -51,7 +59,7 @@ export default function DeleteSessionModal() {
           <button
             type="button"
             onClick={() => setDeletingSession(null)}
-            className={`px-4 py-2 ${BUTTONS.secondary} text-xs font-medium`}
+            className={`px-4 py-2 ${BUTTONS.secondary} text-xs font-medium cursor-pointer`}
           >
             Cancel
           </button>
@@ -59,10 +67,11 @@ export default function DeleteSessionModal() {
           <button
             type="button"
             onClick={handleDelete}
-            className="px-4 py-2 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-medium transition active:scale-95 flex items-center gap-1.5"
+            disabled={isDeleting}
+            className="px-4 py-2 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-semibold transition active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
           >
             <Trash2 size={13} strokeWidth={2} />
-            <span>Delete Session</span>
+            <span>{isDeleting ? 'Deleting...' : 'Delete Session'}</span>
           </button>
         </div>
       </div>

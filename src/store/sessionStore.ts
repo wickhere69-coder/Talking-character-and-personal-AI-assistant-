@@ -233,33 +233,33 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   confirmDeleteSession: async (id: string) => {
     try {
       await apiDeleteSession(id);
-      const remaining = get().sessions.filter(s => s.id !== id);
-      set({
-        sessions: remaining,
-        deletingSession: null
-      });
-
-      // If we just deleted the active session, clear localStorage and pick next
-      if (get().activeSessionId === id) {
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-          } catch {}
-        }
-        const next = remaining.find(s => !s.archived) || remaining[0];
-        if (next) {
-          await get().selectSession(next.id);
-        } else {
-          const fresh = await get().createNewSession('New Conversation', 'General');
-          await get().selectSession(fresh.id);
-        }
-      }
-      return true;
     } catch (err: any) {
-      console.error('[SessionStore] confirmDeleteSession error:', err);
-      set({ error: err?.message || 'Failed to delete session' });
-      return false;
+      console.warn('[SessionStore] Server delete notice (removing locally):', err);
     }
+
+    // Always optimistically remove from local state and close delete modal
+    const remaining = get().sessions.filter(s => s.id !== id);
+    set({
+      sessions: remaining,
+      deletingSession: null
+    });
+
+    // If we just deleted the active session, clear localStorage and pick next
+    if (get().activeSessionId === id) {
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+        } catch {}
+      }
+      const next = remaining.find(s => !s.archived) || remaining[0];
+      if (next) {
+        await get().selectSession(next.id);
+      } else {
+        const fresh = await get().createNewSession('New Conversation', 'General');
+        await get().selectSession(fresh.id);
+      }
+    }
+    return true;
   },
 
   setSessionSearchQuery: (sessionSearchQuery: string) => set({ sessionSearchQuery }),

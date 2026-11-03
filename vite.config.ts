@@ -18,6 +18,7 @@ export default defineConfig({
         '**/.env',
         '**/.env.*',
         '**/server/**',
+        '**/python_backend/**',
         '**/data/**',
         '**/.git/**',
         '**/*.key',
@@ -35,6 +36,15 @@ export default defineConfig({
       ],
     },
     proxy: {
+      '/ws': {
+        target: 'ws://127.0.0.1:8000',
+        ws: true,
+        changeOrigin: true,
+      },
+      '/api/agent': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,

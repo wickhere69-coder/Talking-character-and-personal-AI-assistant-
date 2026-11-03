@@ -282,7 +282,14 @@ app.get('/api/tts-stream', async (req, res) => {
           return res.end(audioBuf);
         }
       } catch (fbErr: any) {
-        res.status(500).json({ error: fbErr.message || 'Streaming failed' });
+        console.warn('Fallback synthesis failed:', fbErr.message);
+      }
+      if (!res.writableEnded) {
+        return res.status(503).json({ error: 'TTS temporarily unavailable' });
+      }
+    } else {
+      if (!res.writableEnded) {
+        res.end();
       }
     }
   }

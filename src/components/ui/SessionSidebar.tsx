@@ -128,16 +128,33 @@ export default function SessionSidebar({ onSessionSelect, compact = false }: Ses
                 </span>
               </div>
 
-              {/* Action kebab menu */}
-              <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+              {/* Action controls: direct trash + kebab menu */}
+              <div className="relative shrink-0 flex items-center gap-1 z-10 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
-                  onClick={() => setMenuOpenId(isMenuOpen ? null : session.id)}
-                  className={`p-1 rounded-md text-[#7A7D86] hover:text-[#FFFFFF] transition opacity-0 group-hover:opacity-100 ${
-                    isMenuOpen ? '!opacity-100 text-[#FFFFFF]' : ''
-                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeletingSession(session);
+                  }}
+                  className={`p-1.5 rounded-lg text-[#7A7D86] hover:text-rose-400 hover:bg-rose-500/20 transition ${
+                    isActive ? 'opacity-75' : 'opacity-0'
+                  } group-hover:opacity-100 hover:!opacity-100 cursor-pointer active:scale-90`}
+                  title="Delete session"
                 >
-                  <MoreVertical size={13} />
+                  <Trash2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpenId(isMenuOpen ? null : session.id);
+                  }}
+                  className={`p-1.5 rounded-lg text-[#7A7D86] hover:text-[#FFFFFF] transition ${
+                    isMenuOpen ? '!opacity-100 text-[#FFFFFF] bg-[#232733]' : isActive ? 'opacity-75' : 'opacity-0'
+                  } group-hover:opacity-100 hover:!opacity-100 cursor-pointer`}
+                  title="More actions"
+                >
+                  <MoreVertical size={14} />
                 </button>
 
                 {isMenuOpen && (

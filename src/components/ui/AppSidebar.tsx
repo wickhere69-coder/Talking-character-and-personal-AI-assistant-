@@ -112,7 +112,7 @@ export default function AppSidebar({ onOpenTab }: AppSidebarProps) {
                   type="button"
                   onClick={() => onOpenTab(item.id)}
                   title={item.label}
-                  className={`relative w-full h-[42px] flex items-center justify-center md:justify-start px-3.5 rounded-[10px] text-[14px] font-medium text-left transition-all duration-150 active:scale-[0.98] ${
+                  className={`relative w-full h-[42px] flex items-center justify-center md:justify-start px-3.5 rounded-[10px] text-[14px] font-medium text-left transition-all duration-150 active:scale-[0.98] cursor-pointer ${
                     isActive
                       ? 'bg-[#8B7CFF] text-[#FFFFFF] font-semibold shadow-[0_2px_12px_rgba(139,124,255,0.25)]'
                       : 'text-[#C9CBD3] hover:text-[#FFFFFF] hover:bg-[#1A1D27]'
