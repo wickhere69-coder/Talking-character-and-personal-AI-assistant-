@@ -15,7 +15,7 @@ export default function DeleteSessionModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
       <div 
-        className="relative w-full max-w-md bg-[#0D0F17]/95 border border-white/[0.08] rounded-[16px] p-6 shadow-2xl overflow-hidden"
+        className="relative w-full max-w-md bg-[#14161E]/95 border border-[#23252F] rounded-[24px] p-6 shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-session-title"
@@ -31,7 +31,7 @@ export default function DeleteSessionModal() {
           <button
             type="button"
             onClick={() => setDeletingSession(null)}
-            className="w-8 h-8 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-[#A7A9AF] hover:text-[#F2F2F2] flex items-center justify-center transition active:scale-95"
+            className="w-8 h-8 rounded-full bg-[#1A1D27] hover:bg-[#202431] text-[#7A7D86] hover:text-[#F2F2F2] flex items-center justify-center transition active:scale-95 border border-[#23252F]"
             title="Cancel"
           >
             <X size={16} />
@@ -40,14 +40,14 @@ export default function DeleteSessionModal() {
 
         <div className="mt-4 space-y-2">
           <h3 id="delete-session-title" className="text-base font-semibold text-[#F2F2F2] font-sans">
-            Delete Chat Session?
+            Delete Archival Session?
           </h3>
-          <p className="text-xs text-[#A7A9AF] leading-relaxed font-sans">
+          <p className="text-xs text-[#7A7D86] leading-relaxed font-sans">
             Are you sure you want to delete <span className="text-[#F2F2F2] font-medium">"{deletingSession.title}"</span>? All messages, transcripts, and contextual memories in this session will be permanently removed.
           </p>
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-white/[0.08]">
+        <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-[#23252F]">
           <button
             type="button"
             onClick={() => setDeletingSession(null)}
@@ -69,4 +69,3 @@ export default function DeleteSessionModal() {
     </div>
   );
 }
-

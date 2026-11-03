@@ -1,9 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { useAppStore } from '@/store/appStore';
-import { Plus, ArrowUp, Mic, Square } from 'lucide-react';
+import { Plus, ArrowRight, Mic, Square } from 'lucide-react';
 import { auraController } from '@/services/auraConversationController';
 import { isComplexReasoning } from '@/utils/reasoningDetector';
 
+/**
+ * ConversationBar — Figma Aura Frame 1:2 Exact Specification
+ * Dimensions: Height 64px, Width ~1096px (max-w-3xl), Radius 32px
+ * Surface: #1C1F2A with #2A2E3B border
+ * Controls: Circular (+) #262A38, Input "Message Aura…", Mic #262A38, Send (40x40 #8B7CFF with →)
+ * Strictly matches Figma Frame 1:2 (No extra chip buttons or text clutter)
+ */
 export default function ConversationBar() {
   const [inputText, setInputText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,7 +47,7 @@ export default function ConversationBar() {
     setInputText('');
     setScriptText('');
 
-    // Intelligently auto-switch to Deep Think (LangGraph) for complex problems / reasoning
+    // Auto-switch to Deep Think for complex queries
     const requiresDeepReasoning = isComplexReasoning(trimmed);
     if (requiresDeepReasoning) {
       setAgentModelName('Deep Think');
@@ -82,11 +89,11 @@ export default function ConversationBar() {
     ? "Aura is speaking..."
     : isAlwaysOnMic
     ? "Always-on mic active — speak or type..."
-    : "Ask Aura anything or speak...";
+    : "Message Aura…";
 
   return (
     <div
-      className="relative z-30 w-full max-w-2xl lg:max-w-3xl mx-auto px-4 pb-6 md:pb-8 pointer-events-auto flex flex-col items-center"
+      className="relative z-30 w-full max-w-xl md:max-w-2xl mx-auto px-4 pb-6 pointer-events-auto flex flex-col items-center font-sans"
       data-purpose="primary-conversation-bar"
     >
       <input
@@ -97,20 +104,20 @@ export default function ConversationBar() {
         className="hidden"
       />
 
-      {/* ── Capsule Input Bar ── */}
-      <div className="relative w-full flex items-center justify-between h-14 md:h-[60px] px-3.5 rounded-full bg-[#0D0F17]/95 backdrop-blur-2xl border border-white/[0.08] hover:border-white/[0.15] focus-within:border-[#A78BFA]/50 focus-within:ring-1 focus-within:ring-[#A78BFA]/20 shadow-[0_16px_48px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.08)] transition-all duration-200 gap-2.5 group">
+      {/* ── Figma Frame 1:2 Composer Capsule: 1096x64 at #1C1F2A, Border #2A2E3B, Radius 32px ── */}
+      <div className="relative w-full flex items-center justify-between h-[64px] px-3.5 rounded-[32px] bg-[#1C1F2A] border border-[#2A2E3B] hover:border-[#8B7CFF]/50 focus-within:border-[#8B7CFF] shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-200 gap-2.5 group">
 
-        {/* Left: Attachment (+) Button */}
+        {/* Left: Circular (+) Button (Figma: Ellipse 36x36 #262A38) */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="w-8 h-8 rounded-full text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.06] transition flex items-center justify-center shrink-0 active:scale-95"
-          title="Attach 3D model or document"
+          className="w-9 h-9 rounded-full bg-[#262A38] hover:bg-[#32374A] text-[#FFFFFF] transition flex items-center justify-center shrink-0 active:scale-95"
+          title="Attach file or 3D model"
         >
-          <Plus size={16} strokeWidth={2} />
+          <Plus size={18} strokeWidth={2.5} />
         </button>
 
-        {/* Center: Clean Text Input */}
+        {/* Center: Clean Text Input with Placeholder "Message Aura…" */}
         <input
           type="text"
           value={inputText || (isListening ? scriptText : '')}
@@ -118,30 +125,18 @@ export default function ConversationBar() {
           onKeyDown={handleKeyDown}
           disabled={isBusy}
           placeholder={placeholder}
-          className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none focus:border-none shadow-none text-xs md:text-sm text-[#F2F2F2] placeholder-[#A7A9AF] px-2 font-sans font-normal disabled:opacity-50"
+          className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none focus:border-none shadow-none text-[15px] text-[#F2F2F2] placeholder-[#7A7D86] px-2 font-sans font-normal disabled:opacity-50"
           style={{ outline: 'none', border: 'none', boxShadow: 'none', background: 'transparent' }}
         />
 
-        {/* Right Controls */}
+        {/* Right Controls: Mic (36x36 #262A38) + Send (40x40 #8B7CFF with →) */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Send button (appears when input or spoken transcript is non-empty) */}
-          {(inputText.trim().length > 0 || (isListening && scriptText.trim().length > 0)) && !isBusy && (
-            <button
-              type="button"
-              onClick={() => handleSend(inputText || scriptText)}
-              className="w-8 h-8 rounded-full bg-[#A78BFA] text-[#0B0D12] hover:bg-[#C4B5FD] active:scale-95 transition flex items-center justify-center shadow-sm font-semibold shrink-0"
-              title="Send message"
-            >
-              <ArrowUp size={15} strokeWidth={2.5} />
-            </button>
-          )}
-
-          {/* Unified Mic / Stop Action Button */}
+          {/* Mic / Stop Action Button */}
           {isCharacterSpeaking ? (
             <button
               type="button"
               onClick={() => auraController.stopConversation()}
-              className="w-9 h-9 rounded-full bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 flex items-center justify-center transition active:scale-95 shrink-0 border border-rose-500/25"
+              className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 flex items-center justify-center transition active:scale-95 shrink-0 border border-rose-500/30"
               title="Stop speaking"
             >
               <Square size={12} strokeWidth={2.5} fill="currentColor" />
@@ -152,25 +147,36 @@ export default function ConversationBar() {
               onClick={handleToggleMic}
               className={`w-9 h-9 rounded-full flex items-center justify-center transition active:scale-95 shrink-0 relative ${
                 isListening
-                  ? 'bg-[#A78BFA] text-[#0B0D12] shadow-sm'
+                  ? 'bg-[#8B7CFF] text-white shadow-[0_0_12px_rgba(139,124,255,0.6)]'
                   : isAlwaysOnMic
-                  ? 'text-[#A78BFA] bg-[#A78BFA]/15 hover:bg-[#A78BFA]/25 border border-[#A78BFA]/30'
-                  : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.06]'
+                  ? 'bg-[#2A2350] text-[#8B7CFF] border border-[#8B7CFF]/40'
+                  : 'bg-[#262A38] text-[#FFFFFF] hover:bg-[#32374A]'
               }`}
               title={
                 isListening
                   ? 'Listening — tap to stop'
                   : isAlwaysOnMic
                   ? 'Always-on mic active — tap to mute'
-                  : 'Click to speak'
+                  : 'Voice input'
               }
             >
-              <Mic size={17} strokeWidth={2} />
+              <Mic size={16} strokeWidth={2} />
               {isListening && (
-                <span className="absolute inset-0 rounded-full border border-[#A78BFA] animate-ping opacity-60" />
+                <span className="absolute inset-0 rounded-full border border-[#8B7CFF] animate-ping opacity-60" />
               )}
             </button>
           )}
+
+          {/* Send Action (Figma: Ellipse 40x40 #8B7CFF, text →) */}
+          <button
+            type="button"
+            onClick={() => handleSend(inputText || scriptText)}
+            disabled={(!inputText.trim() && !(isListening && scriptText.trim())) || isBusy}
+            className="w-10 h-10 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center shadow-[0_2px_12px_rgba(139,124,255,0.4)] text-[#FFFFFF] font-bold shrink-0"
+            title="Send message"
+          >
+            <ArrowRight size={18} strokeWidth={2.5} />
+          </button>
         </div>
       </div>
     </div>

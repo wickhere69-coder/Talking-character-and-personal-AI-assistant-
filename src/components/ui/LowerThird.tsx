@@ -57,15 +57,15 @@ export default function LowerThird() {
 
   return (
     <div 
-      className={`w-full max-w-2xl lg:max-w-3xl mx-auto px-4 z-30 transition-[transform,opacity] duration-200 ease-out transform-gpu pointer-events-none mb-3 ${
+      className={`w-full max-w-xl md:max-w-2xl mx-auto px-4 z-30 transition-[transform,opacity] duration-200 ease-out transform-gpu pointer-events-none mb-3 ${
         isVisible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0 pointer-events-none'
       }`}
     >
-      {/* ── Cinematic Teleprompter Glass Capsule ── */}
-      <div className="relative overflow-hidden bg-[#0D0F17]/95 backdrop-blur-2xl rounded-[16px] px-5 py-4 border border-white/[0.08] shadow-2xl pointer-events-auto flex flex-col gap-2.5 transition-all duration-200">
+      {/* ── Aura Teleprompter Warm Mocha Glass Capsule ── */}
+      <div className="relative overflow-hidden bg-[#14161E]/95 backdrop-blur-2xl rounded-[20px] px-5 py-4 border border-[#23252F] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.8),0_0_40px_0_rgba(200,168,130,0.06)] pointer-events-auto flex flex-col gap-2.5 transition-all duration-200">
         
-        {/* Subtle Iridescent Top Accent Hairline */}
-        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#A78BFA]/50 to-transparent" />
+        {/* Subtle Antique Gold Top Accent Hairline */}
+        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#8B7CFF]/60 to-transparent" />
 
         {/* Confirmation Banner */}
         {pendingConfirmation ? (
@@ -106,10 +106,10 @@ export default function LowerThird() {
                     <React.Fragment key={i}>
                       <span className={`transition-all duration-150 inline-block ${
                         isCurrent
-                          ? 'text-white font-semibold bg-[#A78BFA]/20 border border-[#A78BFA]/40 px-1.5 py-0.5 rounded-lg shadow-sm'
+                          ? 'text-[#141110] font-semibold bg-[#8B7CFF] border border-[#8B7CFF] px-1.5 py-0.5 rounded-lg shadow-sm'
                           : i < currentWordIndex
                           ? 'text-[#F2F2F2]/40'
-                          : 'text-[#F2F2F2]/85'
+                          : 'text-[#F2F2F2]/90'
                       }`}>
                         {word}
                       </span>
@@ -121,18 +121,18 @@ export default function LowerThird() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0 pt-0.5">
-              {/* Animated Speaking Waveform Indicator */}
+              {/* Animated Speaking Waveform Indicator (Antique Gold) */}
               {(isSpeaking || playbackState === 'playing') && (
-                <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[#A78BFA]/15 border border-[#A78BFA]/25 text-[#A78BFA]">
-                  <span className="w-[2px] h-2.5 bg-[#A78BFA] rounded-full animate-[pulse_0.6s_ease-in-out_infinite]" />
-                  <span className="w-[2px] h-3.5 bg-[#A78BFA] rounded-full animate-[pulse_0.4s_ease-in-out_infinite]" />
-                  <span className="w-[2px] h-2 bg-[#A78BFA] rounded-full animate-[pulse_0.8s_ease-in-out_infinite]" />
-                  <span className="w-[2px] h-3 bg-[#A78BFA] rounded-full animate-[pulse_0.5s_ease-in-out_infinite]" />
+                <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[#8B7CFF]/15 border border-[#8B7CFF]/30 text-[#8B7CFF]">
+                  <span className="w-[2px] h-2.5 bg-[#8B7CFF] rounded-full animate-[pulse_0.6s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-3.5 bg-[#8B7CFF] rounded-full animate-[pulse_0.4s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-2 bg-[#8B7CFF] rounded-full animate-[pulse_0.8s_ease-in-out_infinite]" />
+                  <span className="w-[2px] h-3 bg-[#8B7CFF] rounded-full animate-[pulse_0.5s_ease-in-out_infinite]" />
                 </div>
               )}
 
               {currentEmotion.primary !== 'neutral' && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#A78BFA]/15 text-[#C4B5FD] border border-[#A78BFA]/25 rounded-full capitalize">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#8B7CFF]/15 text-[#E7C08E] border border-[#8B7CFF]/25 capitalize">
                   {currentEmotion.primary}
                 </span>
               )}

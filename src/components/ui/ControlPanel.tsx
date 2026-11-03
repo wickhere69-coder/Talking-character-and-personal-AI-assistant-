@@ -647,26 +647,26 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
         }`}
       >
         {/* ── Solid Charcoal Shell (#181818) ── */}
-        <div className="h-full bg-[#0D0F17]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden">
+        <div className="h-full bg-[#14161E]/95 backdrop-blur-3xl border border-[#23252F] rounded-[24px] shadow-[0_24px_80px_rgba(0,0,0,0.95),0_0_50px_rgba(200,168,130,0.06)] flex flex-col overflow-hidden">
 
           {/* ── 1. Drawer Header ── */}
-          <div className="px-5 py-4 border-b border-[#2A2C33] bg-[#181818]/60 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-[#23252F] bg-[#14161E]/70 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-[#202126] border border-[#2A2C33] flex items-center justify-center text-[#A78BFA]">
+              <div className="w-8 h-8 rounded-full bg-[#1A1D27] border border-[#8B7CFF]/30 flex items-center justify-center text-[#8B7CFF]">
                 <Sparkles size={17} strokeWidth={1.75} />
               </div>
               <div>
-                <h2 className="text-[11px] font-semibold tracking-wider uppercase text-[#A7A9AF] font-mono">
+                <h2 className="text-[13px] font-semibold tracking-[0.22em] uppercase text-[#F2F2F2] font-sans">
                   AI STUDIO
                 </h2>
-                <p className="text-[11px] text-[#A7A9AF] font-normal tracking-normal">
+                <p className="text-[11px] text-[#7A7D86] font-sans">
                   Assistant Telemetry & Studio Controls
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#131622] border border-[#2A2C33] text-[11px] font-mono text-[#A7A9AF]">
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#1A1D27] border border-[#23252F] text-[11px] font-sans text-[#C9CBD3]">
                 <span className={agentHealthInfo.connected ? STATUS_DOTS.success : STATUS_DOTS.danger} />
                 <span className="tracking-wide">{agentHealthInfo.connected ? 'ONLINE' : 'OFFLINE'}</span>
               </div>
@@ -677,7 +677,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setIsCollapsed(true);
                   setStoreNavTab('home');
                 }}
-                className="w-8 h-8 rounded-full bg-[#131622] border border-[#2A2C33] flex items-center justify-center text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-[#202126] active:scale-95 transition shadow-sm"
+                className="w-8 h-8 rounded-full bg-[#1A1D27] border border-[#23252F] flex items-center justify-center text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-[#1A1D27] active:scale-95 transition shadow-sm"
                 title="Close Drawer"
               >
                 <X size={15} strokeWidth={1.75} />
@@ -686,8 +686,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           </div>
 
           {/* ── 2. Top-Level Tab Switcher ── */}
-          <div className="p-3 border-b border-[#2A2C33] bg-[#0D0F17]">
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#11131C] border border-[#2A2C33] rounded-full">
+          <div className="p-3 border-b border-[#23252F] bg-[#14161E]">
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#1A1D27] border border-[#23252F] rounded-full">
               <button
                 type="button"
                 onClick={() => {
@@ -696,8 +696,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   loadHistory();
                 }}
                 className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'chat' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.08] shadow-sm'
-                    : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
+                  activeTab === 'chat' ? 'bg-gradient-to-b from-[#F2F2F2] to-[#FFFFFF] text-[#FFFFFF] font-semibold shadow-sm'
+                    : 'text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
                 <MessageSquare size={14} strokeWidth={2} />
@@ -711,8 +711,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setStoreNavTab('voice');
                 }}
                 className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'voice' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.08] shadow-sm'
-                    : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
+                  activeTab === 'voice' ? 'bg-gradient-to-b from-[#F2F2F2] to-[#FFFFFF] text-[#FFFFFF] font-semibold shadow-sm'
+                    : 'text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
                 <Mic size={14} strokeWidth={2} />
@@ -726,8 +726,8 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   setStoreNavTab('settings');
                 }}
                 className={`py-2 px-3 rounded-full text-xs font-medium transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 ${
-                  activeTab === 'settings' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.08] shadow-sm'
-                    : 'text-[#A7A9AF] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
+                  activeTab === 'settings' ? 'bg-gradient-to-b from-[#F2F2F2] to-[#FFFFFF] text-[#FFFFFF] font-semibold shadow-sm'
+                    : 'text-[#7A7D86] hover:text-[#F2F2F2] hover:bg-white/[0.04]'
                 }`}
               >
                 <Sliders size={14} strokeWidth={2} />
@@ -765,16 +765,16 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           {activeTab === 'voice' && (
             <div className="space-y-5">
               {/* ElevenLabs Voice Pack Banner */}
-              <div className="flex items-center justify-between p-3.5 rounded-[14px] bg-[#131622] border border-[#2A2C33]">
+              <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-[#1A1D27] border border-[#23252F]">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-full bg-[#A78BFA]/15 border border-[#A78BFA]/25 flex items-center justify-center text-[#A78BFA] shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-[#8B7CFF]/15 border border-[#8B7CFF]/30 flex items-center justify-center text-[#8B7CFF] shrink-0">
                     <Sparkles size={16} strokeWidth={1.75} />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-xs font-semibold text-[#F2F2F2] font-sans truncate">
                       ElevenLabs Voice Pack
                     </h3>
-                    <p className="text-[10px] text-[#A7A9AF] font-mono">
+                    <p className="text-[10px] text-[#7A7D86] font-mono">
                       {filteredVoices.length} Premium Neural Voice{filteredVoices.length === 1 ? '' : 's'}
                     </p>
                   </div>
@@ -786,13 +786,13 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
 
               {/* Voice Search */}
               <div className="relative">
-                <Search size={16} strokeWidth={1.5} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#A7A9AF]" />
+                <Search size={16} strokeWidth={1.5} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#7A7D86]" />
                 <input
                   type="text"
                   value={voiceSearchQuery}
                   onChange={(e) => setVoiceSearchQuery(e.target.value)}
                   placeholder="Search voices by name or language..."
-                  className="w-full bg-[#11131C] border border-[#2A2C33] focus:border-[#A78BFA]/50 focus:ring-1 focus:ring-[#A78BFA]/20 rounded-full pl-10 pr-4 py-2 text-xs md:text-sm text-[#F2F2F2] placeholder-[#A7A9AF] focus:outline-none transition font-sans"
+                  className="w-full w-full bg-[#1A1D27] border border-[#23252F] focus:border-[#8B7CFF]/60 focus:ring-1 focus:ring-[#8B7CFF]/25 rounded-full pl-10 pr-4 py-2 text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86] focus:outline-none transition font-sans"
                 />
               </div>
 
@@ -806,7 +806,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                       key={voice.id}
                       onClick={() => handleSelectVoice(voice.id)}
                       className={`p-3 rounded-2xl border transition-all duration-150 flex items-center justify-between cursor-pointer active:scale-[0.99] ${
-                        isSelected ? 'bg-[#202126] border-[#A78BFA]/50 ring-1 ring-[#A78BFA]/20' : 'bg-[#131622] border border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
+                        isSelected ? 'bg-[#202431] border-[#8B7CFF]/50 ring-1 ring-[#8B7CFF]/30' : 'bg-[#1A1D27] border border-[#23252F] hover:border-[#8B7CFF]/30 hover:bg-[#202431]'
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
@@ -816,7 +816,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                             e.stopPropagation();
                             handleSelectVoice(voice.id);
                           }}
-                          className="w-8 h-8 rounded-full bg-[#11131C] hover:bg-[#A78BFA] text-[#A7A9AF] hover:text-[#0B0D12] flex items-center justify-center transition active:scale-90 shrink-0 border border-[#2A2C33] hover:border-transparent shadow-sm"
+                          className="w-8 h-8 rounded-full bg-[#1A1D27] hover:bg-[#8B7CFF] text-[#7A7D86] hover:text-[#FFFFFF] flex items-center justify-center transition active:scale-90 shrink-0 border border-[#23252F] hover:border-transparent shadow-sm"
                           title="Select and preview voice sample"
                         >
                           <Play size={14} strokeWidth={2} />
@@ -826,12 +826,12 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                             {voice.name}
                           </p>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] font-mono text-[#A7A9AF]">{voice.lang}</span>
+                            <span className="text-[10px] font-mono text-[#7A7D86]">{voice.lang}</span>
                             <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-[#A78BFA]/15 text-[#C4B5FD] font-mono uppercase font-semibold">
                               ElevenLabs
                             </span>
                             {voice.description && (
-                              <span className="text-[10px] text-[#A7A9AF]/70 truncate max-w-[160px] font-sans">
+                              <span className="text-[10px] text-[#7A7D86]/70 truncate max-w-[160px] font-sans">
                                 &bull; {voice.description}
                               </span>
                             )}
@@ -840,7 +840,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                       </div>
 
                       {isSelected && (
-                        <div className="w-5 h-5 rounded-full bg-[#A78BFA] text-[#0B0D12] flex items-center justify-center shrink-0 shadow-sm">
+                        <div className="w-5 h-5 rounded-full bg-[#8B7CFF] text-[#FFFFFF] flex items-center justify-center shrink-0 shadow-sm">
                           <Check size={13} strokeWidth={2.5} />
                         </div>
                       )}
@@ -850,7 +850,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
               </div>
 
               {/* Speech Sliders: Pitch, Rate, Lip-Sync */}
-              <div className="bg-[#131622] rounded-[14px] border border-[#2A2C33] p-4 space-y-4">
+              <div className="bg-[#1A1D27] rounded-[16px] border border-[#23252F] p-4 space-y-4">
                 {/* Lip Sync Delay Calibration */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
@@ -864,9 +864,9 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                     step={5}
                     value={lipSyncDelayMs}
                     onChange={(e) => setLipSyncDelayMs(Number(e.target.value))}
-                    className="w-full h-1.5 bg-[#181818] rounded-lg appearance-none cursor-pointer accent-[#A78BFA]"
+                    className="w-full h-1.5 bg-[#181818] rounded-lg appearance-none cursor-pointer accent-[#8B7CFF]"
                   />
-                  <p className="text-[10px] text-[#A7A9AF]/70 font-sans">
+                  <p className="text-[10px] text-[#7A7D86]/70 font-sans">
                     Fine-tune phoneme timing with bluetooth or speaker latency. Default is 0ms.
                   </p>
                 </div>
@@ -875,7 +875,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                 <div className="flex items-center justify-between pt-3 border-t border-[#2A2C33]">
                   <div>
                     <span className="text-xs font-medium text-[#F2F2F2]/90 block font-sans">Pronunciation Practice</span>
-                    <span className="text-[10px] text-[#A7A9AF]/70 block font-sans">Repeats user microphone speech automatically</span>
+                    <span className="text-[10px] text-[#7A7D86]/70 block font-sans">Repeats user microphone speech automatically</span>
                   </div>
                   <button
                     type="button"
@@ -885,7 +885,7 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                       setAgentModeType(next ? 'repeat' : 'agent');
                     }}
                     className={`w-11 h-6 rounded-full transition-colors relative p-0.5 ${
-                      autoRepeat ? 'bg-[#A78BFA]' : 'bg-[#11131C] border border-[#2A2C33]'
+                      autoRepeat ? 'bg-[#8B7CFF]' : 'bg-[#1A1D27] border border-[#23252F]'
                     }`}
                   >
                     <div
@@ -900,127 +900,182 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           )}
 
           {/* ══════════════════════════════════════════════════════════════ */}
-          {/* TAB 3: PREFERENCES (Clean — no tech details exposed)         */}
+          {/* TAB 3: PREFERENCES (Figma Frame 1:102)                      */}
           {/* ══════════════════════════════════════════════════════════════ */}
           {activeTab === 'settings' && (
-            <div className="space-y-5">
+            <div className="space-y-4 font-sans">
+              {/* Header matching Figma Frame 1:102 */}
+              <div className="space-y-1 pb-1">
+                <h3 className="text-[20px] font-bold text-[#FFFFFF] tracking-tight">Settings</h3>
+                <p className="text-[13px] text-[#A7A9AF] leading-relaxed">
+                  Every section uses the same dark premium tokens — no second theme.
+                </p>
+              </div>
 
-              {/* Intelligence Mode */}
-              <div className="space-y-3">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-[#A7A9AF] font-mono">
-                  Intelligence Mode
-                </span>
-                <div className="grid grid-cols-1 gap-2.5">
-                  {[
-                    { id: 'gemini' as const, label: 'Balanced', desc: 'Fast and smart — great for most conversations' },
-                    { id: 'langgraph' as const, label: 'Deep Think', desc: 'Best for complex problems and detailed analysis' },
-                    { id: 'instant' as const, label: 'Lightning', desc: 'Instant responses, works offline' }
-                  ].map((mode) => {
-                    const isSelected = agentSpeed === mode.id;
-                    return (
+              {/* ── 4 Figma Cards (Frame 1:102 / 13:80: Voice, Model, Appearance, Memory & Sessions) ── */}
+              <div className="grid grid-cols-1 gap-3.5">
+                
+                {/* 1. Voice Card (Figma: 520x180 at #1A1D27, Border #2A2E3B) */}
+                <div className="p-4 rounded-[16px] bg-[#1A1D27] border border-[#2A2E3B] flex flex-col justify-between gap-3 transition hover:border-[#8B7CFF]/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-[15px] font-bold text-[#FFFFFF] tracking-tight">Voice</h4>
+                      <p className="text-[12px] text-[#A7A9AF] mt-0.5">Wake word “Aura”  •  Voice switching</p>
+                    </div>
+                    {/* Figma Toggle Switch (46x26 in #2A2E3B with 18x18 circle in #8B7CFF) */}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={isAlwaysOnMic}
+                      onClick={() => auraController.setAlwaysOnMic(!isAlwaysOnMic)}
+                      className="w-[46px] h-[26px] rounded-full bg-[#2A2E3B] p-1 flex items-center transition-colors relative shrink-0"
+                      title={isAlwaysOnMic ? 'Disable Always-On Mic' : 'Enable Always-On Mic'}
+                    >
                       <div
-                        key={mode.id}
-                        onClick={() => {
-                          setAgentSpeed(mode.id);
-                          setAgentModelName(mode.label);
-                        }}
-                        className={`p-3.5 rounded-[14px] border transition cursor-pointer flex items-center justify-between ${
-                          isSelected ? 'bg-[#202126] border-[#A78BFA]/50 ring-1 ring-[#A78BFA]/20' : 'bg-[#131622] border border-[#2A2C33] hover:border-[#3A3D46] hover:bg-[#202126]'
+                        className={`w-[18px] h-[18px] rounded-full transition-transform ${
+                          isAlwaysOnMic ? 'translate-x-5 bg-[#8B7CFF]' : 'translate-x-0 bg-[#7A7D86]'
                         }`}
-                      >
-                        <div>
-                          <p className={`text-sm font-semibold font-sans ${isSelected ? 'text-[#F2F2F2]' : 'text-[#F2F2F2]/80'}`}>
-                            {mode.label}
-                          </p>
-                          <span className="text-[11px] text-[#A7A9AF]">{mode.desc}</span>
-                        </div>
-                        {isSelected && (
-                          <div className="w-5 h-5 rounded-full bg-[#A78BFA] text-[#0B0D12] flex items-center justify-center shrink-0">
-                            <Check size={13} strokeWidth={2.5} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      />
+                    </button>
+                  </div>
+                  <div className="pt-2 border-t border-[#23252F] flex flex-col gap-1 text-[13px] text-[#C9CBD3]">
+                    <div className="flex items-center justify-between">
+                      <span>Voice: ElevenLabs</span>
+                      <span className="text-[11px] text-[#7A7D86] font-mono">Neural HD</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Wake word: {isAlwaysOnMic ? 'On' : 'Off'}</span>
+                      <span className={`text-[11px] font-medium ${isAlwaysOnMic ? 'text-[#34D399]' : 'text-[#7A7D86]'}`}>
+                        {isAlwaysOnMic ? 'Listening' : 'Standby'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
+
+                {/* 2. Model Card (Figma: 520x180 at #1A1D27, Border #2A2E3B) */}
+                <div className="p-4 rounded-[16px] bg-[#1A1D27] border border-[#2A2E3B] flex flex-col justify-between gap-3 transition hover:border-[#8B7CFF]/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-[15px] font-bold text-[#FFFFFF] tracking-tight">Model</h4>
+                      <p className="text-[12px] text-[#A7A9AF] mt-0.5">Gemini / Grok  •  Deep Think</p>
+                    </div>
+                    {/* Toggle Switch */}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={agentSpeed === 'langgraph'}
+                      onClick={() => {
+                        const nextSpeed = agentSpeed === 'langgraph' ? 'gemini' : 'langgraph';
+                        setAgentSpeed(nextSpeed);
+                        setAgentModelName(nextSpeed === 'langgraph' ? 'Deep Think' : 'Gemini Pro');
+                      }}
+                      className="w-[46px] h-[26px] rounded-full bg-[#2A2E3B] p-1 flex items-center transition-colors relative shrink-0"
+                      title={agentSpeed === 'langgraph' ? 'Switch to Fast Model' : 'Enable Deep Think'}
+                    >
+                      <div
+                        className={`w-[18px] h-[18px] rounded-full transition-transform ${
+                          agentSpeed === 'langgraph' ? 'translate-x-5 bg-[#8B7CFF]' : 'translate-x-0 bg-[#7A7D86]'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="pt-2 border-t border-[#23252F] flex flex-col gap-1 text-[13px] text-[#C9CBD3]">
+                    <div className="flex items-center justify-between">
+                      <span>Model: {agentSpeed === 'langgraph' ? 'Deep Think' : 'Gemini Pro'}</span>
+                      <span className="text-[11px] text-[#7A7D86] font-mono">2.5 Flash</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Deep Think: {agentSpeed === 'langgraph' ? 'On' : 'Off'}</span>
+                      <span className={`text-[11px] font-medium ${agentSpeed === 'langgraph' ? 'text-[#8B7CFF]' : 'text-[#7A7D86]'}`}>
+                        {agentSpeed === 'langgraph' ? 'Multi-Step' : 'Instant'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Appearance Card (Figma: 520x180 at #1A1D27, Border #2A2E3B) */}
+                <div className="p-4 rounded-[16px] bg-[#1A1D27] border border-[#2A2E3B] flex flex-col justify-between gap-3 transition hover:border-[#8B7CFF]/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-[15px] font-bold text-[#FFFFFF] tracking-tight">Appearance</h4>
+                      <p className="text-[12px] text-[#A7A9AF] mt-0.5">Dark premium  •  Violet accent</p>
+                    </div>
+                    {/* Fixed Active Switch */}
+                    <div
+                      className="w-[46px] h-[26px] rounded-full bg-[#2A2E3B] p-1 flex items-center relative shrink-0 cursor-default"
+                    >
+                      <div className="w-[18px] h-[18px] rounded-full translate-x-5 bg-[#8B7CFF]" />
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-[#23252F] flex flex-col gap-1 text-[13px] text-[#C9CBD3]">
+                    <div className="flex items-center justify-between">
+                      <span>Theme: Dark</span>
+                      <span className="text-[11px] text-[#8B7CFF] font-medium">#0B0D12</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Accent: Violet</span>
+                      <span className="text-[11px] text-[#8B7CFF] font-medium">#8B7CFF</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Memory & Sessions Card (Figma: 520x180 at #1A1D27, Border #2A2E3B) */}
+                <div className="p-4 rounded-[16px] bg-[#1A1D27] border border-[#2A2E3B] flex flex-col justify-between gap-3 transition hover:border-[#8B7CFF]/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-[15px] font-bold text-[#FFFFFF] tracking-tight">Memory & Sessions</h4>
+                      <p className="text-[12px] text-[#A7A9AF] mt-0.5">Session history  •  Long-term memory</p>
+                    </div>
+                    {/* Auto-archive Toggle (Off in Figma) */}
+                    <div
+                      className="w-[46px] h-[26px] rounded-full bg-[#2A2E3B] p-1 flex items-center relative shrink-0 cursor-default"
+                    >
+                      <div className="w-[18px] h-[18px] rounded-full translate-x-0 bg-[#7A7D86]" />
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-[#23252F] flex flex-col gap-1 text-[13px] text-[#C9CBD3]">
+                    <div className="flex items-center justify-between">
+                      <span>Auto-archive: Off</span>
+                      <span className="text-[11px] text-[#7A7D86]">Retained</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Memory: On</span>
+                      <span className="text-[11px] text-[#34D399] font-medium">Vector Sync</span>
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
-              {/* Always-On Microphone Setting */}
-              <div className="bg-[#131622] rounded-[14px] border border-[#2A2C33] p-4 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-semibold text-[#F2F2F2] block font-sans">
-                    Always-On Microphone
-                  </span>
-                  <span className="text-[11px] text-[#A7A9AF]/70 block font-sans mt-0.5">
-                    Continuous hands-free conversation with intelligent feedback suppression
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isAlwaysOnMic}
-                  onClick={() => auraController.setAlwaysOnMic(!isAlwaysOnMic)}
-                  className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
-                    isAlwaysOnMic ? 'bg-[#A78BFA]' : 'bg-[#11131C] border border-[#2A2C33]'
-                  }`}
-                  title={isAlwaysOnMic ? 'Disable Always-On Mic' : 'Enable Always-On Mic'}
-                >
-                  <div
-                    className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                      isAlwaysOnMic ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Camera View */}
-              <div className="space-y-3">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-[#A7A9AF] font-mono">
-                  Camera View
-                </span>
-                <div className="grid grid-cols-2 gap-3">
+              {/* Camera Perspective Quick Controls */}
+              <div className="pt-2 flex items-center justify-between px-1">
+                <span className="text-[11px] uppercase tracking-wider text-[#7A7D86] font-semibold">Camera View</span>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveCamera('wide')}
-                    className={`py-2.5 px-3 rounded-full border text-xs font-medium flex items-center justify-center gap-2 transition active:scale-95 ${
-                      activeCamera === 'wide' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.12] shadow-sm' : 'bg-[#131622] border border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
+                    className={`px-3 py-1.5 rounded-[12px] text-xs font-medium transition ${
+                      activeCamera === 'wide'
+                        ? 'bg-[#8B7CFF] text-[#FFFFFF]'
+                        : 'bg-[#1A1D27] text-[#C9CBD3] hover:text-[#FFFFFF] border border-[#2A2E3B]'
                     }`}
                   >
-                    <Maximize2 size={15} strokeWidth={1.5} />
-                    <span>Wide View</span>
+                    Wide
                   </button>
-
                   <button
                     type="button"
                     onClick={() => setActiveCamera('closeup')}
-                    className={`py-2.5 px-3 rounded-full border text-xs font-medium flex items-center justify-center gap-2 transition active:scale-95 ${
-                      activeCamera === 'closeup' ? 'bg-[#202126] text-[#F2F2F2] font-semibold border border-white/[0.12] shadow-sm' : 'bg-[#131622] border border-[#2A2C33] text-[#A7A9AF] hover:text-[#F2F2F2] hover:border-[#3A3D46]'
+                    className={`px-3 py-1.5 rounded-[12px] text-xs font-medium transition ${
+                      activeCamera === 'closeup'
+                        ? 'bg-[#8B7CFF] text-[#FFFFFF]'
+                        : 'bg-[#1A1D27] text-[#C9CBD3] hover:text-[#FFFFFF] border border-[#2A2E3B]'
                     }`}
                   >
-                    <Focus size={15} strokeWidth={1.5} />
-                    <span>Close-up</span>
+                    Close-up
                   </button>
                 </div>
               </div>
-
-              {/* Status — clean, no model/DB info */}
-              <div className="bg-[#131622] rounded-[14px] border border-[#2A2C33] p-4 space-y-0 text-xs">
-                <div className="flex items-center justify-between py-2.5 border-b border-[#2A2C33]">
-                  <span className="text-[#A7A9AF] font-sans">Assistant Status</span>
-                  <span className="text-emerald-400 font-medium">Online & Ready</span>
-                </div>
-                <div className="flex items-center justify-between py-2.5 border-b border-[#2A2C33]">
-                  <span className="text-[#A7A9AF] font-sans">Memory</span>
-                  <span className="text-[#F2F2F2] font-mono">Active</span>
-                </div>
-                <div className="flex items-center justify-between py-2.5">
-                  <span className="text-[#A7A9AF] font-sans">Voice Synthesis</span>
-                  <span className="text-[#F2F2F2] font-mono">Neural HD</span>
-                </div>
-              </div>
-
-            </div>
-          )}
+            </div>          )}
 
         </div>
       </div>

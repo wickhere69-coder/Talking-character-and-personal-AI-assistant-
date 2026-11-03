@@ -29,19 +29,19 @@ export default function ConversationHistoryModal() {
   if (!isHistoryModalOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-fade-in">
       <div
-        className={`w-full max-w-2xl ${SURFACES.modalShell} overflow-hidden flex flex-col max-h-[80vh]`}
+        className={`w-full max-w-2xl ${SURFACES.modalShell} overflow-hidden flex flex-col max-h-[80vh] border border-[#23252F]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A2C33] bg-[#181818]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#23252F] bg-[#14161E]/90">
           <div className="flex items-center gap-2.5">
-            <MessageSquare size={16} strokeWidth={1.5} className="text-[#A78BFA]" />
-            <h2 className={TYPO.title}>
-              Conversation Memory & History
+            <span className="text-[#8B7CFF] text-sm">✦</span>
+            <h2 className="font-sans text-[15px] font-semibold tracking-tight text-[#F2F2F2]">
+              Archival Conversation Memory
             </h2>
-            <span className="px-2 py-0.5 rounded-full font-mono text-[11px] bg-[#202126] text-[#A7A9AF] border border-[#2A2C33]">
+            <span className="px-2.5 py-0.5 rounded-full font-sans text-[11px] bg-[#1A1D27] text-[#C9CBD3] border border-[#23252F]">
               {history.length} {history.length === 1 ? 'turn' : 'turns'}
             </span>
           </div>
@@ -70,19 +70,19 @@ export default function ConversationHistoryModal() {
         </div>
 
         {/* Message List */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[#0D0F17]">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[#14161E]">
           {loading ? (
-            <div className="py-16 text-center text-[#A7A9AF]/60 text-xs font-sans">
-              Loading conversation history...
+            <div className="py-16 text-center text-[#7A7D86] text-xs font-sans">
+              Loading archival conversation history...
             </div>
           ) : history.length === 0 ? (
             <div className="py-16 text-center space-y-2 flex flex-col items-center justify-center">
-              <div className="w-10 h-10 rounded-full bg-[#202126] border border-[#2A2C33] flex items-center justify-center mb-1">
-                <MessageSquare size={18} strokeWidth={1.5} className="text-[#A7A9AF]" />
+              <div className="w-10 h-10 rounded-full bg-[#1A1D27] border border-[#23252F] flex items-center justify-center mb-1">
+                <MessageSquare size={18} strokeWidth={1.5} className="text-[#7A7D86]" />
               </div>
-              <p className="text-xs text-[#F2F2F2]/90 font-medium font-sans">No conversation history yet.</p>
-              <p className="text-[11px] text-[#A7A9AF]/70 max-w-xs font-sans">
-                Ask the AI Assistant a question or speak into the microphone to start a session.
+              <p className="text-xs text-[#F2F2F2] font-medium font-sans">No conversation history yet.</p>
+              <p className="text-[11px] text-[#7A7D86] max-w-xs font-sans">
+                Ask Aura a question or speak into the microphone to begin.
               </p>
             </div>
           ) : (
@@ -91,7 +91,7 @@ export default function ConversationHistoryModal() {
                 key={idx}
                 className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
-                <span className={`${TYPO.label} px-1 flex items-center gap-1.5 text-[#A7A9AF]`}>
+                <span className={`${TYPO.label} px-1 flex items-center gap-1.5 text-[#7A7D86]`}>
                   {msg.role === 'user' ? (
                     <>
                       <User size={10} strokeWidth={1.5} />
@@ -99,16 +99,16 @@ export default function ConversationHistoryModal() {
                     </>
                   ) : (
                     <>
-                      <Bot size={10} strokeWidth={1.5} className="text-[#A78BFA]" />
-                      <span>Aura AI Assistant</span>
+                      <Bot size={10} strokeWidth={1.5} className="text-[#8B7CFF]" />
+                      <span>Aura</span>
                     </>
                   )}
                 </span>
                 <div
-                  className={`max-w-[85%] rounded-[14px] px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap font-sans ${
+                  className={`max-w-[85%] rounded-[16px] px-4 py-3 text-[13px] leading-relaxed select-text whitespace-pre-wrap font-sans shadow-sm ${
                     msg.role === 'user'
-                      ? 'bg-[#202126] border border-[#2A2C33] text-[#F2F2F2] font-medium rounded-br-sm shadow-sm'
-                      : 'bg-[#131622] border border-[#2A2C33] border-l-2 border-l-[#6E8BFF] text-[#F2F2F2] rounded-[14px] rounded-bl-sm'
+                      ? 'bg-[#202431] border border-[#23252F] text-[#F2F2F2] font-medium rounded-br-sm'
+                      : 'bg-[#1A1D27] border border-[#23252F] border-l-2 border-l-[#8B7CFF] text-[#F2F2F2] rounded-bl-sm'
                   }`}
                 >
                   {msg.content}
@@ -119,8 +119,8 @@ export default function ConversationHistoryModal() {
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3 border-t border-[#2A2C33] bg-[#181818] flex items-center justify-between text-[11px] text-[#A7A9AF]">
-          <span>Stored locally in private session memory</span>
+        <div className="px-6 py-3 border-t border-[#23252F] bg-[#14161E]/90 flex items-center justify-between text-[11px] text-[#7A7D86]">
+          <span>Stored in private archival session memory</span>
           <button
             type="button"
             onClick={() => setIsHistoryModalOpen(false)}

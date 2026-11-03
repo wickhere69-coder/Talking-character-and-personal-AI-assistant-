@@ -14,11 +14,18 @@ export default function HomeGreeting() {
       className="relative z-10 text-center select-none pointer-events-none pt-8 md:pt-14 px-4 transition-all duration-300"
       data-purpose="home-greeting-headline"
     >
-      <h1 className="text-3xl sm:text-4xl md:text-5xl font-light text-[#F2F2F2] tracking-tight font-sans">
+      <div className="inline-flex items-center gap-2 mb-2">
+        <span className="text-[#C8A882] text-sm">✦</span>
+        <span className="font-serif tracking-[0.22em] uppercase text-xs text-[#C8A882] font-semibold">
+          AI STUDIO
+        </span>
+        <span className="text-[#C8A882] text-sm">✦</span>
+      </div>
+      <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-normal text-[#FAF6F0] tracking-tight">
         {dynamicGreeting}
       </h1>
-      <p className="text-sm md:text-base text-[#A7A9AF] font-normal font-sans mt-2 tracking-normal">
-        Say <span className="text-[#A78BFA] font-medium">"Hey Aura"</span> to start a conversation
+      <p className="text-sm md:text-base text-[#8C7664] font-sans mt-2 tracking-normal">
+        Say <span className="text-[#C8A882] font-semibold">"Hey Aura"</span> or tap the microphone to start
       </p>
     </div>
   );

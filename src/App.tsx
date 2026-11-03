@@ -64,8 +64,8 @@ export default function App() {
   if (isAdminOpen) {
     return (
       <Suspense fallback={
-        <div className="min-h-screen bg-[#0B0D12] flex items-center justify-center">
-          <div className="text-[#A78BFA] text-sm animate-pulse">Loading admin panel...</div>
+        <div className="min-h-screen bg-[#141110] flex items-center justify-center">
+          <div className="text-[#8B7CFF] text-sm animate-pulse">Loading admin panel...</div>
         </div>
       }>
         <AdminPanel onBack={() => {
@@ -180,23 +180,36 @@ function MainApp() {
         <AppSidebar onOpenTab={handleOpenTab} />
 
         {/* ── RIGHT: Main Conversation & Talking Character Area ── */}
-        <main className="flex-1 relative h-full flex flex-col justify-end overflow-hidden bg-[#0B0D12]">
+        <main className="flex-1 relative h-full flex flex-col justify-between overflow-hidden bg-[#0B0D12]">
 
-          {/* ── Layered Atmospheric Background ── */}
+          {/* ── Layered Atmospheric Background (Figma Aura Dark Premium) ── */}
           <div className="absolute inset-0 pointer-events-none z-0">
-            {/* Primary character backlight glow */}
-            <div className="absolute top-[38%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[700px] bg-[#314B9A]/15 rounded-full blur-[160px] animate-[pulse_8s_ease-in-out_infinite]" />
-            {/* Secondary warm accent — subtle purple-rose halo */}
-            <div className="absolute top-[55%] left-[55%] -translate-x-1/2 -translate-y-1/2 w-[500px] h-[400px] bg-[#6E3FA0]/8 rounded-full blur-[120px]" />
+            {/* Primary character backlight glow (Figma: Violet aura) */}
+            <div className="absolute top-[42%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[750px] h-[650px] bg-[#8B7CFF]/10 rounded-full blur-[150px] animate-[pulse_8s_ease-in-out_infinite]" />
+            {/* Concentric ambient rings behind avatar (Figma: #1B1F2E / #232845) */}
+            <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[280px] h-[280px] bg-[#1B1F2E]/60 rounded-full blur-[35px]" />
+            <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[136px] h-[136px] bg-[#232845]/70 rounded-full blur-[20px]" />
             {/* Top-edge vignette for depth */}
-            <div className="absolute top-0 left-0 right-0 h-40 bg-gradient-to-b from-[#0B0D12] via-[#0B0D12]/60 to-transparent" />
-            {/* Bottom-edge vignette to ground the input bar */}
-            <div className="absolute bottom-0 left-0 right-0 h-56 bg-gradient-to-t from-[#0B0D12] via-[#0B0D12]/80 to-transparent" />
-            {/* Ultra-subtle noise texture overlay */}
-            <div className="absolute inset-0 opacity-[0.025]" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")', backgroundRepeat: 'repeat', backgroundSize: '128px 128px' }} />
+            <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-[#0B0D12] via-[#0B0D12]/50 to-transparent" />
+            {/* Bottom-edge vignette to ground the composer */}
+            <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-[#0B0D12] via-[#0B0D12]/70 to-transparent" />
           </div>
 
-          {/* ── 3D Viewport Canvas ── */}
+          {/* ── Top Bar: Figma Aura Header (Clean Settings Pill matching Frame 1:2) ── */}
+          <div className="relative z-20 w-full px-6 pt-5 flex items-center justify-end select-none pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => handleOpenTab('settings')}
+              className={`h-9 px-4 rounded-[18px] border text-xs font-medium transition active:scale-95 ${
+                activeNavTab === 'settings' && !isControlPanelCollapsed
+                  ? 'bg-[#8B7CFF] border-[#8B7CFF] text-[#FFFFFF] shadow-[0_2px_12px_rgba(139,124,255,0.35)]'
+                  : 'bg-[#1A1D27] hover:bg-[#232733] border-[#2A2E3B] hover:border-[#8B7CFF]/50 text-[#C9CBD3] hover:text-[#FFFFFF]'
+              }`}
+            >
+              Settings
+            </button>
+          </div>
+          {/* ── 3D Viewport Canvas (Clean uninterrupted stage) ── */}
           <div className="absolute inset-0 z-0">
             <Canvas
               gl={{ toneMapping: THREE.NoToneMapping, antialias: true, alpha: true }}
@@ -213,8 +226,6 @@ function MainApp() {
             </Canvas>
           </div>
 
-
-
           {/* ── CENTER-BOTTOM: Subtitles + Input ── */}
           <div className="relative z-20 w-full flex flex-col items-center">
             <LowerThird />
@@ -227,10 +238,10 @@ function MainApp() {
         {/* ── 3D Scene Loader ── */}
         <Loader
           containerStyles={{ background: '#0B0D12', zIndex: 60 }}
-          innerStyles={{ width: '240px', backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: '9999px' }}
-          barStyles={{ background: '#A78BFA', borderRadius: '9999px' }}
-          dataStyles={{ color: '#F2F2F2', fontSize: '13px', fontWeight: '400', fontFamily: 'Inter, sans-serif' }}
-          dataInterpolation={(p) => `Loading... ${p.toFixed(0)}%`}
+          innerStyles={{ width: '240px', backgroundColor: '#1A1D27', borderRadius: '9999px' }}
+          barStyles={{ background: '#8B7CFF', borderRadius: '9999px' }}
+          dataStyles={{ color: '#F2F2F2', fontSize: '13px', fontWeight: '500', fontFamily: '"Inter", sans-serif' }}
+          dataInterpolation={(p) => `Loading Aura... ${p.toFixed(0)}%`}
         />
 
         {/* ── Drawer (Chat, Voice) ── */}

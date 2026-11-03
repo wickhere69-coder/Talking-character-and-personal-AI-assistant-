@@ -19,7 +19,10 @@ import {
   ArrowLeft,
   MessageSquare,
   MoreVertical,
-  ArchiveRestore
+  ArchiveRestore,
+  Lightbulb,
+  Shirt,
+  BookOpen
 } from 'lucide-react';
 
 interface SessionChatPanelProps {
@@ -43,7 +46,8 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
   const {
     agentStatus,
     isSpeaking,
-    playbackState
+    playbackState,
+    agentSpeed
   } = useAppStore();
 
   const [inputVal, setInputVal] = useState('');
@@ -95,39 +99,23 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
     setIsEditingTitle(false);
   };
 
-  // Topic-tailored starter prompt suggestions
-  const topicStarters = React.useMemo(() => {
-    const topic = session?.topic?.toLowerCase() || '';
-    if (topic.includes('software') || topic.includes('code') || topic.includes('engineering') || topic.includes('tech')) {
-      return [
-        'Review my architectural strategy for this project',
-        'Help me optimize database querying and latency',
-        'What were the system constraints we agreed upon?'
-      ];
-    }
-    if (topic.includes('career') || topic.includes('interview')) {
-      return [
-        'Run a technical mock interview with me',
-        'Critique my answers using the STAR method',
-        'What questions should I ask the hiring team?'
-      ];
-    }
-    return [
-      'What did we discuss earlier in this session?',
-      'Summarize our conversation and key decisions so far',
-      'What are our next priority action items?'
-    ];
-  }, [session?.topic]);
+  // Curated suggested follow-ups
+  const curatedSuggestions = [
+    { text: "What is happening in Israel today?", icon: Sparkles },
+    { text: "Summarize latest developments", icon: Lightbulb },
+    { text: "Help me analyze a complex problem", icon: BookOpen },
+    { text: "Explain your tools and capabilities", icon: Shirt }
+  ];
 
   if (!session) {
     return (
-      <div className="flex-1 h-full flex flex-col items-center justify-center p-8 text-center space-y-4">
-        <div className="w-12 h-12 rounded-[14px] bg-[#131622] border border-[#2A2C33] flex items-center justify-center text-[#A78BFA]">
+      <div className="flex-1 h-full flex flex-col items-center justify-center p-8 text-center space-y-4 select-none font-sans">
+        <div className="w-12 h-12 rounded-[16px] bg-[#1A1D27] border border-[#2A2E3B] flex items-center justify-center text-[#8B7CFF]">
           <MessageSquare size={22} strokeWidth={1.75} />
         </div>
         <div className="space-y-1">
-          <p className="text-[15px] font-semibold text-[#F2F2F2] font-sans">No Conversation Selected</p>
-          <p className="text-xs text-[#A7A9AF] max-w-xs font-sans leading-relaxed">
+          <p className="text-[15px] font-bold text-[#F2F2F2]">No Conversation Selected</p>
+          <p className="text-xs text-[#7A7D86] max-w-xs leading-relaxed">
             Select a session from the history sidebar or create a new conversation to start.
           </p>
         </div>
@@ -136,15 +124,15 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-transparent select-text">
+    <div className="flex flex-col h-full overflow-hidden bg-transparent select-text font-sans">
       {/* ── 1. Top Session Header ── */}
-      <div className="px-5 py-3.5 border-b border-[#2A2C33] bg-[#0D0F17]/90 backdrop-blur-xl flex items-center justify-between gap-3 shrink-0">
+      <div className="px-5 py-3.5 border-b border-[#23252F] bg-[#14161E]/95 backdrop-blur-xl flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {showBackControl && (
             <button
               type="button"
               onClick={onBackToSessions}
-              className="p-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-[#A7A9AF] hover:text-[#F2F2F2] transition active:scale-95 shrink-0 border border-white/[0.08]"
+              className="p-1.5 rounded-full bg-[#1A1D27] hover:bg-[#202431] text-[#C9CBD3] hover:text-[#FFFFFF] transition active:scale-95 shrink-0 border border-[#2A2E3B]"
               title="Back to Sessions"
             >
               <ArrowLeft size={16} />
@@ -159,13 +147,13 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveTitle()}
-                  className="px-3 py-1 rounded-full bg-[#11131C] border border-[#2A2C33] text-xs text-[#F2F2F2] focus:outline-none focus:border-[#A78BFA]/50 w-full max-w-xs font-sans"
+                  className="px-3 py-1 rounded-[12px] bg-[#1A1D27] border border-[#8B7CFF] text-xs text-[#F2F2F2] focus:outline-none w-full max-w-xs font-sans"
                   autoFocus
                 />
                 <button
                   type="button"
                   onClick={handleSaveTitle}
-                  className="p-1.5 rounded-full bg-[#A78BFA] text-[#0B0D12] hover:bg-[#C4B5FD] shrink-0 transition"
+                  className="p-1.5 rounded-full bg-[#8B7CFF] text-white hover:bg-[#9E91FF] shrink-0 transition"
                 >
                   <Check size={13} strokeWidth={2.5} />
                 </button>
@@ -173,7 +161,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             ) : (
               <div className="flex items-center gap-2 group">
                 <h3
-                  className="text-[15px] font-semibold text-[#F2F2F2] font-sans truncate cursor-pointer hover:text-[#A78BFA] transition"
+                  className="text-[16px] font-bold text-[#FFFFFF] tracking-tight truncate cursor-pointer hover:text-[#8B7CFF] transition"
                   onClick={() => {
                     setTitleDraft(session.title);
                     setIsEditingTitle(true);
@@ -188,7 +176,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                     setTitleDraft(session.title);
                     setIsEditingTitle(true);
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 text-[#A7A9AF] hover:text-[#F2F2F2] transition shrink-0"
+                  className="opacity-0 group-hover:opacity-100 p-0.5 text-[#7A7D86] hover:text-[#FFFFFF] transition shrink-0"
                   title="Rename"
                 >
                   <Edit2 size={12} />
@@ -197,15 +185,15 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             )}
 
             <div className="flex items-center gap-2.5 mt-1">
-              <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-[#131622] text-[#A7A9AF] border border-[#2A2C33] flex items-center gap-1.5">
-                <Tag size={10} className="text-[#A78BFA]" />
+              <span className="text-[11px] px-2.5 py-0.5 rounded-[12px] bg-[#1A1D27] text-[#C9CBD3] border border-[#2A2E3B] flex items-center gap-1.5">
+                <Tag size={10} className="text-[#8B7CFF]" />
                 {session.topic || 'General'}
               </span>
-              <span className="text-[11px] font-mono text-[#A7A9AF]">
-                {activeMessages.length} msgs
+              <span className="text-[11px] text-[#7A7D86]">
+                {activeMessages.length} msgs • Today
               </span>
               {session.pinned && (
-                <span className="text-[11px] font-mono text-amber-400 flex items-center gap-1">
+                <span className="text-[11px] text-[#8B7CFF] flex items-center gap-1">
                   <Pin size={10} fill="currentColor" /> Pinned
                 </span>
               )}
@@ -213,16 +201,16 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
           </div>
         </div>
 
-        {/* Action Controls: Clean Memory Pill + Single Menu */}
+        {/* Action Controls: Memory Pill + Menu */}
         <div className="flex items-center gap-2 shrink-0">
           {/* Memory Inspector Button */}
           <button
             type="button"
             onClick={() => setIsMemoryInspectorOpen(true)}
-            className="px-3 py-1.5 rounded-full bg-[#A78BFA]/10 hover:bg-[#A78BFA]/20 border border-[#A78BFA]/25 text-[#C4B5FD] text-[11px] font-mono font-medium transition flex items-center gap-1.5 active:scale-95 shadow-sm"
+            className="px-3 py-1.5 rounded-[19px] bg-[#1A1D27] hover:bg-[#202431] border border-[#2A2E3B] text-[#C9CBD3] hover:text-[#FFFFFF] text-[11px] font-medium transition flex items-center gap-1.5 active:scale-95 shadow-sm"
             title="Inspect Topic & Contextual Memory for this session"
           >
-            <Brain size={13} strokeWidth={2} />
+            <Brain size={13} strokeWidth={2} className="text-[#8B7CFF]" />
             <span>Memory</span>
           </button>
 
@@ -231,7 +219,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             <button
               type="button"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="p-2 rounded-full border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.08] text-[#A7A9AF] hover:text-[#F2F2F2] transition active:scale-95"
+              className="p-2 rounded-full border border-[#2A2E3B] bg-[#1A1D27] hover:bg-[#202431] text-[#7A7D86] hover:text-[#FFFFFF] transition active:scale-95"
               title="More session options"
             >
               <MoreVertical size={14} />
@@ -239,7 +227,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
 
             {isMenuOpen && (
               <div
-                className="absolute right-0 top-10 z-50 w-44 bg-[#0D0F17] border border-[#2A2C33] rounded-[14px] shadow-2xl p-1.5 flex flex-col gap-0.5 animate-in fade-in zoom-in-95 duration-100"
+                className="absolute right-0 top-10 z-50 w-44 bg-[#14161E] border border-[#23252F] rounded-[16px] shadow-2xl p-1.5 flex flex-col gap-0.5"
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
@@ -248,9 +236,9 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                     togglePinSession(session.id);
                     setIsMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 rounded-lg text-left text-xs text-[#F2F2F2] hover:bg-white/[0.06] flex items-center gap-2.5 transition"
+                  className="w-full px-3 py-2 rounded-lg text-left text-xs text-[#F2F2F2] hover:bg-[#1A1D27] flex items-center gap-2.5 transition"
                 >
-                  <Pin size={13} className={session.pinned ? 'text-amber-400' : 'text-[#A7A9AF]'} />
+                  <Pin size={13} className={session.pinned ? 'text-[#8B7CFF]' : 'text-[#7A7D86]'} />
                   <span>{session.pinned ? 'Unpin Session' : 'Pin Session'}</span>
                 </button>
 
@@ -261,9 +249,9 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                     setIsEditingTitle(true);
                     setIsMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 rounded-lg text-left text-xs text-[#F2F2F2] hover:bg-white/[0.06] flex items-center gap-2.5 transition"
+                  className="w-full px-3 py-2 rounded-lg text-left text-xs text-[#F2F2F2] hover:bg-[#1A1D27] flex items-center gap-2.5 transition"
                 >
-                  <Edit2 size={13} className="text-[#A7A9AF]" />
+                  <Edit2 size={13} className="text-[#7A7D86]" />
                   <span>Rename Session</span>
                 </button>
 
@@ -273,22 +261,22 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                     toggleArchiveSession(session.id);
                     setIsMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 rounded-lg text-left text-xs text-[#F2F2F2] hover:bg-white/[0.06] flex items-center gap-2.5 transition"
+                  className="w-full px-3 py-2 rounded-lg text-left text-xs text-[#F2F2F2] hover:bg-[#1A1D27] flex items-center gap-2.5 transition"
                 >
                   {session.archived ? (
                     <>
-                      <ArchiveRestore size={13} className="text-[#A78BFA]" />
+                      <ArchiveRestore size={13} className="text-[#8B7CFF]" />
                       <span>Unarchive Session</span>
                     </>
                   ) : (
                     <>
-                      <Archive size={13} className="text-[#A7A9AF]" />
+                      <Archive size={13} className="text-[#7A7D86]" />
                       <span>Archive Session</span>
                     </>
                   )}
                 </button>
 
-                <div className="h-px bg-white/[0.08] my-1" />
+                <div className="h-px bg-[#23252F] my-1" />
 
                 <button
                   type="button"
@@ -307,50 +295,68 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
         </div>
       </div>
 
+      {/* ── Mode Pill (Figma Frame 13:28: Deep Think • Voice) ── */}
+      <div className="px-5 pt-3 pb-1 flex items-center justify-between shrink-0">
+        <div className="h-[34px] px-3.5 rounded-[19px] bg-[#1A1D27] border border-[#2A2E3B] text-[12px] text-[#C9CBD3] flex items-center gap-2">
+          <span className="text-[#8B7CFF] font-bold">◉</span>
+          <span>{agentSpeed === 'langgraph' ? 'Deep Think' : 'Balanced'} • Voice</span>
+        </div>
+        <span className="text-[11px] text-[#7A7D86]">
+          {activeMessages.length} messages • Today
+        </span>
+      </div>
+
       {/* ── 2. Message History Stream ── */}
-      <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-5 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
         {isLoadingMessages ? (
-          <div className="py-16 text-center text-xs text-[#A7A9AF] font-sans">
+          <div className="py-16 text-center text-xs text-[#7A7D86] font-sans">
             Loading conversation...
           </div>
         ) : activeMessages.length === 0 ? (
-          /* Empty State */
-          <div className="py-12 flex flex-col items-center justify-center text-center space-y-5 px-4 max-w-lg mx-auto">
-            <div className="w-12 h-12 rounded-[14px] bg-[#131622] border border-[#2A2C33] flex items-center justify-center text-[#A78BFA] shadow-sm">
-              <Sparkles size={20} strokeWidth={1.75} />
+          /* Empty State (Figma Style) */
+          <div className="py-8 flex flex-col items-center justify-center text-center space-y-5 px-4 max-w-lg mx-auto">
+            <div className="w-12 h-12 rounded-[16px] bg-[#1A1D27] border border-[#8B7CFF]/30 flex items-center justify-center text-[#8B7CFF] shadow-sm">
+              <Sparkles size={22} />
             </div>
 
             <div className="space-y-1">
-              <h4 className="text-[15px] font-semibold text-[#F2F2F2] font-sans">
+              <h4 className="text-[17px] font-bold text-[#F2F2F2] tracking-tight">
                 {session.title}
               </h4>
-              <p className="text-xs text-[#A7A9AF] font-sans leading-relaxed">
-                Focused on <span className="text-[#C4B5FD] font-medium">{session.topic}</span>. Conversations in this session maintain persistent contextual memory.
+              <p className="text-xs text-[#A7A9AF] leading-relaxed">
+                Focused on <span className="text-[#8B7CFF] font-medium">{session.topic}</span>. Conversations in this session maintain persistent memory.
               </p>
             </div>
 
-            {/* Prompt Starter Chips */}
-            <div className="space-y-2 w-full pt-1">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-[#A7A9AF]">
-                Suggested Questions
-              </span>
-              <div className="flex flex-col gap-2">
-                {topicStarters.map((starter, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => auraController.ask(starter)}
-                    className="w-full text-left px-4 py-2.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-[#A78BFA]/40 text-xs text-[#F2F2F2] transition flex items-center justify-between group active:scale-[0.99]"
-                  >
-                    <span className="font-sans truncate">{starter}</span>
-                    <Send size={12} className="text-[#A7A9AF] group-hover:text-[#A78BFA] shrink-0 transition" />
-                  </button>
-                ))}
+            {/* Suggested Follow-ups Chips */}
+            <div className="space-y-2.5 w-full pt-2">
+              <p className="text-[11px] tracking-wider font-semibold text-[#7A7D86] uppercase text-center">
+                SUGGESTED PROMPTS
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {curatedSuggestions.map((item, i) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => auraController.ask(item.text)}
+                      className="group flex items-center gap-3 p-3 rounded-[14px] bg-[#1A1D27] hover:bg-[#202431] border border-[#2A2E3B] hover:border-[#8B7CFF]/50 text-left transition-all duration-200 active:scale-[0.99]"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-[#14161E] border border-[#23252F] flex items-center justify-center shrink-0 text-[#8B7CFF]">
+                        <Icon size={14} />
+                      </div>
+                      <span className="text-xs leading-snug font-medium text-[#F2F2F2] flex-1">
+                        {item.text}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
         ) : (
-          /* Message Bubbles */
+          /* Message Bubbles matching Figma Frame 13:28 */
           activeMessages.map((msg) => {
             const isUser = msg.role === 'user';
 
@@ -360,45 +366,41 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                 className={`flex flex-col gap-1.5 group ${isUser ? 'items-end' : 'items-start'}`}
               >
                 <div className="flex items-center gap-2 px-1">
-                  <span className="text-[11px] font-mono text-[#A7A9AF] font-medium">
+                  <span className="text-[11px] text-[#7A7D86] font-medium">
                     {isUser ? 'You' : 'Aura'}
                   </span>
-                  <span className="text-[11px] font-mono text-[#A7A9AF]/60">
+                  <span className="text-[10px] text-[#7A7D86]/60">
                     {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
 
                 <div
-                  className={`relative max-w-[85%] rounded-[14px] px-4 py-3 text-[13px] leading-relaxed font-sans shadow-sm whitespace-pre-wrap ${
+                  className={`relative max-w-[85%] rounded-[16px] px-4 py-3 text-[13px] md:text-[14px] leading-relaxed whitespace-pre-wrap ${
                     isUser
-                      ? 'bg-[#202126] border border-white/[0.08] text-[#F2F2F2] rounded-br-sm'
-                      : 'bg-[#131622] border border-[#2A2C33] border-l-2 border-l-[#6E8BFF] text-[#F2F2F2] rounded-bl-sm'
+                      ? 'bg-[#1A1D27] border border-[#2A2E3B] text-[#F2F2F2]'
+                      : 'bg-[#232845] border border-[#8B7CFF] text-[#F2F2F2] shadow-[0_4px_20px_rgba(139,124,255,0.1)]'
                   }`}
                 >
-                  {msg.content}
+                  <p>{msg.content}</p>
 
-                  {/* Bubble Action Bar on hover */}
-                  <div
-                    className={`absolute -bottom-3 ${
-                      isUser ? 'left-2' : 'right-2'
-                    } opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-[#0D0F17] border border-[#2A2C33] rounded-full px-2 py-0.5 shadow-md z-10`}
-                  >
+                  {/* Actions for messages */}
+                  <div className="flex items-center gap-2 mt-2 pt-1 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
                     <button
                       type="button"
                       onClick={() => handleCopy(msg.id, msg.content)}
-                      className="p-1 text-[#A7A9AF] hover:text-[#F2F2F2] transition"
+                      className="p-1 rounded text-[#7A7D86] hover:text-[#FFFFFF] transition"
                       title="Copy text"
                     >
-                      {copiedId === msg.id ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                      {copiedId === msg.id ? <Check size={12} className="text-[#34D399]" /> : <Copy size={12} />}
                     </button>
                     {!isUser && (
                       <button
                         type="button"
                         onClick={() => handleReadAloud(msg.content)}
-                        className="p-1 text-[#A7A9AF] hover:text-[#A78BFA] transition"
+                        className="p-1 rounded text-[#7A7D86] hover:text-[#8B7CFF] transition"
                         title="Read aloud"
                       >
-                        <Volume2 size={11} />
+                        <Volume2 size={12} />
                       </button>
                     )}
                   </div>
@@ -407,52 +409,30 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             );
           })
         )}
-
-        {/* Thinking Indicator */}
-        {isBusy && (
-          <div className="flex items-center gap-2.5 p-3 rounded-[14px] bg-[#131622] border border-[#2A2C33] text-xs text-[#A7A9AF] font-sans animate-pulse max-w-sm">
-            <Sparkles size={14} className="text-[#A78BFA] animate-spin" />
-            <span>Aura is formulating the response...</span>
-          </div>
-        )}
-
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── 3. Embedded Chat Composer ── */}
-      <div className="p-4 border-t border-[#2A2C33] bg-[#0D0F17]/90 backdrop-blur-xl shrink-0">
-        <div className="relative flex items-center gap-2 bg-[#11131C] border border-[#2A2C33] hover:border-white/[0.15] focus-within:border-[#A78BFA]/50 focus-within:ring-1 focus-within:ring-[#A78BFA]/20 rounded-full px-4 py-2 transition shadow-inner">
+      {/* ── 3. Bottom Composer Pill (Figma: Height 64px, Fill #1C1F2A, Border #2A2E3B, Radius 33px) ── */}
+      <div className="p-4 border-t border-[#23252F] bg-[#14161E]">
+        <div className="flex items-center gap-2 h-12 px-3.5 rounded-[33px] bg-[#1C1F2A] border border-[#2A2E3B] focus-within:border-[#8B7CFF] transition">
           <input
             type="text"
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isBusy}
-            placeholder={`Ask Aura anything in this session...`}
-            className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 text-xs md:text-sm text-[#F2F2F2] placeholder-[#A7A9AF] font-sans disabled:opacity-50"
-            style={{ outline: 'none', border: 'none', boxShadow: 'none', background: 'transparent' }}
+            placeholder={isBusy ? "Thinking..." : "Message Aura…"}
+            className="flex-1 bg-transparent border-none outline-none text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86]"
           />
-
-          {isCharacterSpeaking ? (
-            <button
-              type="button"
-              onClick={() => auraController.stopConversation()}
-              className="p-2 rounded-full bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 border border-rose-500/20 transition active:scale-95 shrink-0"
-              title="Stop speaking"
-            >
-              <Square size={13} fill="currentColor" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!inputVal.trim() || isBusy}
-              className="p-2 rounded-full bg-[#A78BFA] text-[#0B0D12] hover:bg-[#C4B5FD] disabled:opacity-30 disabled:hover:bg-[#A78BFA] transition active:scale-95 shrink-0"
-              title="Send message"
-            >
-              <Send size={13} strokeWidth={2.5} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!inputVal.trim() || isBusy}
+            className="w-8 h-8 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] disabled:opacity-40 text-white flex items-center justify-center transition active:scale-95"
+            title="Send"
+          >
+            <Send size={13} />
+          </button>
         </div>
       </div>
     </div>
