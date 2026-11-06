@@ -211,22 +211,51 @@ class AuraConversationController {
     this.processQuery(prompt);
   }
 
-  private isEchoOfLastAnswer(text: string): boolean {
-    if (!this.lastSpokenAnswer) return false;
+  private isEchoOfText(text: string, reference: string): boolean {
+    if (!reference) return false;
     const t = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-    const a = this.lastSpokenAnswer.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-    if (t.length < 5) return false;
-    if (a.includes(t)) return true;
+    const r = reference.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    if (t.length < 3 || r.length < 3) return false;
+    if (r.includes(t) || t.includes(r)) return true;
 
-    // Check word overlap: if >65% of words are from Aura's own last answer, it is an echo
-    const tWords = t.split(/\s+/).filter(w => w.length > 3);
-    if (tWords.length >= 4) {
-      const matches = tWords.filter(w => a.includes(w));
-      if (matches.length / tWords.length > 0.65) {
+    // Check word overlap: if >35% of significant words match reference, it is acoustic bleed
+    const tWords = t.split(/\s+/).filter(w => w.length > 2);
+    if (tWords.length >= 2) {
+      const matches = tWords.filter(w => r.includes(w));
+      if (matches.length / tWords.length > 0.35) {
         return true;
       }
     }
     return false;
+  }
+
+  private isEchoOfLastAnswer(text: string): boolean {
+    if (!this.lastSpokenAnswer) return false;
+    return this.isEchoOfText(text, this.lastSpokenAnswer);
+  }
+
+  /**
+   * Real-Time Voice Barge-In:
+   * Instantly halts ongoing audio, cancels backend LLM generation,
+   * emits polite spoken chirp ("Oh, go ahead!"), and switches to active listening.
+   */
+  private interruptCurrentSpeech(currentlySpoken: string) {
+    this.isProcessingOrSpeaking = false;
+    this.speechCooldownUntil = 0;
+    voiceManager.stopAll('user_barge_in');
+    this.streamAbort?.abort();
+
+    if (this.activeRequestId) {
+      pythonBackendService.cancel(this.activeRequestId, currentlySpoken);
+      this.activeRequestId = null;
+    }
+
+    // Play instant polite chirp
+    voiceManager.playChirp("Oh, go ahead!");
+
+    this.setState('listening');
+    this.store.setAgentStatus('listening');
+    this.store.setIsListening(true);
   }
 
   private startActiveListening() {
@@ -235,15 +264,25 @@ class AuraConversationController {
 
     this.activeRecognizer = createSpeechRecognizer({
       onTranscript: (transcript: string, isFinal: boolean) => {
-        // Discard any incoming audio if character is currently speaking or in post-speech cooldown
+        // 1. ABSOLUTE CHAT LOOP PREVENTION:
+        // If Aura is speaking, processing, or in post-speech cooldown, NEVER submit speech to the conversation!
         if (this.isProcessingOrSpeaking || Date.now() < this.speechCooldownUntil) {
+          // Check for explicit stop / interruption keywords only
+          const lower = transcript.toLowerCase().trim();
+          const isStopCmd = /^(stop|wait|hold on|pause|be quiet|hush|cancel|shut up)\b/i.test(lower);
+          if (isStopCmd) {
+            console.log('[Aura] Explicit user interruption command detected:', lower);
+            const currentlySpoken = voiceManager.getCurrentlySpokenText();
+            this.interruptCurrentSpeech(currentlySpoken);
+          }
+          // In all cases while speaking, discard this transcript to prevent feedback loops!
           return;
         }
 
         const trimmed = transcript.trim();
         if (!trimmed) return;
 
-        // Discard self-echo
+        // Discard acoustic self-echo from recently completed speech
         if (this.isEchoOfLastAnswer(trimmed)) {
           console.log('[Aura] Echo filtered:', trimmed);
           return;
@@ -422,9 +461,34 @@ class AuraConversationController {
     };
 
     // 3. Start streaming sentence queue in voiceManager
-    voiceManager.startStreamSession(() => {
-      this.onResponseComplete();
-    });
+    // Pass onSentenceStart callback: Audio sound has literally started coming out of the speakers!
+    let spokenSoFar = '';
+    voiceManager.startStreamSession(
+      () => {
+        this.onResponseComplete();
+      },
+      (sentenceText: string) => {
+        // EXACT AUDIO-TEXT SYNCHRONIZATION:
+        // Text is illuminated at the exact millisecond speech begins playing!
+        if (!hasStartedSpeaking) {
+          hasStartedSpeaking = true;
+          this.setState('speaking');
+          this.store.setAgentStatus('speaking');
+        }
+        spokenSoFar += (spokenSoFar ? ' ' : '') + sentenceText;
+        if (currentSessionId) {
+          useSessionStore.getState().appendLocalMessage({
+            id: assistantMsgId,
+            sessionId: currentSessionId,
+            role: 'assistant',
+            content: spokenSoFar,
+            createdAt: Date.now(),
+            status: 'delivered',
+            modelUsed: providerToSend
+          });
+        }
+      }
+    );
 
     if (this.activeRequestId) {
       pythonBackendService.cancel(this.activeRequestId);
@@ -446,14 +510,9 @@ class AuraConversationController {
             if (abortSignal.aborted) return;
             const cleaned = cleanTextForSpeech(sentence);
             if (cleaned.length > 0) {
-              if (!hasStartedSpeaking) {
-                hasStartedSpeaking = true;
-                this.setState('speaking');
-                this.store.setAgentStatus('speaking');
-              }
-              // Immediately illuminate the teleprompter subtitle capsule with the answer
-              this.store.setSpeechText(cleaned);
-              this.store.setCurrentSentence(cleaned);
+              // Queue sentence to audio pipeline.
+              // Note: DO NOT set speechText or append to chat here!
+              // voiceManager will set speechText and invoke onSentenceStart when audio ACTUALLY starts playing!
               voiceManager.enqueueSentence(cleaned);
             }
           },
@@ -461,17 +520,7 @@ class AuraConversationController {
             clearWatchdog();
             if (abortSignal.aborted) return;
             accumulatedText += (accumulatedText ? ' ' : '') + chunk;
-            if (currentSessionId && accumulatedText.trim()) {
-              useSessionStore.getState().appendLocalMessage({
-                id: assistantMsgId,
-                sessionId: currentSessionId,
-                role: 'assistant',
-                content: accumulatedText,
-                createdAt: Date.now(),
-                status: 'delivered',
-                modelUsed: providerToSend
-              });
-            }
+            // DO NOT appendLocalMessage here — keeps text from appearing ahead of voice!
           },
           onDone: (fullResponse: string, modelUsed: string, respSessionId?: string) => {
             clearWatchdog();
@@ -549,8 +598,9 @@ class AuraConversationController {
     this.store.setIsSpeaking(false);
     this.store.setPlaybackState('idle');
 
-    // Enforce 800ms echo suppression cooldown to guarantee zero feedback loop
-    this.speechCooldownUntil = Date.now() + 800;
+    // Enforce 1200ms echo suppression cooldown to guarantee zero feedback loop
+    this.speechCooldownUntil = Date.now() + 1200;
+    this.activeRecognizer?.clear();
 
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
     this.cooldownTimer = setTimeout(() => {
@@ -562,7 +612,7 @@ class AuraConversationController {
         this.setState('sleeping');
         this.store.setIsListening(false);
       }
-    }, 800);
+    }, 1200);
   }
 
   private returnToSleep(reason: string) {

@@ -150,7 +150,7 @@ export default function Character({ url }: { url?: string }) {
   }, [activeCharIndex, isSpeaking]);
 
   useFrame((state, delta) => {
-    const { isSpeaking, playbackState, agentStatus } = useAppStore.getState();
+    const { isSpeaking, playbackState, agentStatus, currentEmotion } = useAppStore.getState();
     const speaking = isSpeaking || playbackState === 'playing';
 
     if (lipSyncController.current) {
@@ -158,7 +158,7 @@ export default function Character({ url }: { url?: string }) {
     }
     
     if (proceduralAnimation.current) {
-      proceduralAnimation.current.update(delta, speaking, agentStatus);
+      proceduralAnimation.current.update(delta, speaking, agentStatus, currentEmotion?.primary || 'neutral');
     }
   });
 

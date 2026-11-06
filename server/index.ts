@@ -328,6 +328,37 @@ app.post('/api/synthesize', async (req, res) => {
   }
 });
 
+// Instant Barge-In Chirp Endpoint (< 5ms response from cache)
+app.get('/api/chirp', async (req, res) => {
+  const rawText = sanitizeString(req.query.text as string || '', 128) || 'Oh, go ahead!';
+  const rawVoice = sanitizeString(req.query.voice as string || '', 64) || 'pFZP5JQG7iQjIQuC4Bku';
+  const cacheKey = `chirp:${rawVoice}:${rawText}`;
+  const cached = ttsAudioCache.get(cacheKey) || ttsAudioCache.get(`${rawVoice}:${rawText}`);
+  if (cached) {
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', cached.length);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.end(cached);
+  }
+
+  try {
+    const audioBuf = await synthesizeNeuralAudio(rawText, rawVoice);
+    if (audioBuf) {
+      ttsAudioCache.set(cacheKey, audioBuf);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Length', audioBuf.length);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.end(audioBuf);
+    }
+  } catch (err: any) {
+    console.warn('[CHIRP] Synthesis error:', err?.message || err);
+  }
+
+  if (!res.writableEnded) {
+    res.status(503).send('Chirp unavailable');
+  }
+});
+
 app.post('/api/elevenlabs', async (req, res) => {
   const apiKey = (req.headers['xi-api-key'] as string) || req.body.apiKey || ELEVENLABS_KEY;
   if (!apiKey) {
@@ -440,6 +471,25 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
+// Pre-warm common vocal chirps & opening phrases into in-memory audio cache
+async function prewarmAudioCache() {
+  const commonPhrases = [
+    'Oh, go ahead!',
+    'Go on, I am listening.',
+  ];
+  for (const phrase of commonPhrases) {
+    try {
+      const buf = await synthesizeNeuralAudio(phrase, 'pFZP5JQG7iQjIQuC4Bku');
+      if (buf) {
+        ttsAudioCache.set(`chirp:pFZP5JQG7iQjIQuC4Bku:${phrase}`, buf);
+        ttsAudioCache.set(`pFZP5JQG7iQjIQuC4Bku:${phrase}`, buf);
+      }
+    } catch {}
+  }
+  console.log('[AUDIO CACHE] Pre-warmed audio cache initialized successfully.');
+}
+
 app.listen(PORT, () => {
   console.log(`TTS proxy server running securely on http://localhost:${PORT} [NODE_ENV=${process.env.NODE_ENV || 'production'}]`);
+  prewarmAudioCache().catch(() => {});
 });

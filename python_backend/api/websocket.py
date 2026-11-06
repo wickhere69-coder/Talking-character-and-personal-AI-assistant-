@@ -56,10 +56,10 @@ class SentenceBuffer:
                         sentences.append(cleaned)
                     continue
 
-            # 2. Fast-start first clause: if nothing has been spoken yet and buffer has 6+ words with a pause
+            # 2. Fast-start first clause: if nothing has been spoken yet and buffer has 3+ words with a pause
             if self._dispatched_count == 0:
                 words = self._buffer.strip().split()
-                if len(words) >= 6:
+                if len(words) >= 3:
                     c_match = CLAUSE_PAUSE_PATTERN.match(self._buffer)
                     if c_match:
                         head = c_match.group(1).strip()
@@ -131,12 +131,24 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await send_event({"type": "pong"})
                 continue
 
-            # 2. Cancellation
+            # 2. Cancellation / Barge-in
             if msg_type == "cancel":
                 req_id = data.get("request_id") or active_request_id
+                spoken_content = data.get("spoken_content") or data.get("spokenContent")
                 if active_task and not active_task.done():
                     active_task.cancel()
-                    logger.info("Cancelled active request: %s", req_id)
+                    logger.info("Cancelled active request on barge-in: %s", req_id)
+
+                # Persist interruption state in SQLite for smart resumption
+                try:
+                    memory_store = get_memory_store()
+                    await memory_store.mark_message_interrupted(
+                        session_id=session_id,
+                        spoken_content=spoken_content,
+                    )
+                except Exception as e:
+                    logger.warning("Notice marking message interrupted in DB: %s", e)
+
                 await send_event({
                     "type": "assistant.cancelled",
                     "request_id": req_id,
@@ -234,10 +246,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         })
 
                     except asyncio.CancelledError:
-                        await send_event({
-                            "type": "assistant.cancelled",
-                            "request_id": req_id,
-                        })
+                        logger.debug("Turn cancelled by client for request: %s", req_id)
                     except Exception as err:
                         logger.error("Error handling turn: %s", err, exc_info=True)
                         await send_event({

@@ -157,6 +157,32 @@ export function detectEmotion(text: string): EmotionState {
   };
 }
 
+export type NavarasaType =
+  | 'shringara'  // 1. Warmth, Charm, Affection (happy)
+  | 'hasya'      // 2. Humor, Wit, Banter (amused)
+  | 'karuna'     // 3. Compassion, Empathy, Care (empathetic)
+  | 'raudra'     // 4. Passion, Conviction, Energy (excited)
+  | 'vira'       // 5. Confidence, Heroism, Boldness (confident)
+  | 'bhayanaka'  // 6. Protective Care, Caution (concerned)
+  | 'bibhatsa'   // 7. High Discernment, Poised Reflection (thoughtful)
+  | 'adbhuta'    // 8. Wonder, Awe, Curiosity (curious, surprised)
+  | 'shanta';    // 9. Serenity, Peace, Calm (neutral)
+
+export function mapToNavarasa(emotion: EmotionType | string): NavarasaType {
+  switch (emotion) {
+    case 'happy': return 'shringara';
+    case 'amused': return 'hasya';
+    case 'empathetic': return 'karuna';
+    case 'excited': return 'raudra';
+    case 'confident': return 'vira';
+    case 'concerned': return 'bhayanaka';
+    case 'thoughtful': return 'bibhatsa';
+    case 'curious':
+    case 'surprised': return 'adbhuta';
+    default: return 'shanta';
+  }
+}
+
 export type GestureCue =
   | 'nod'
   | 'head_tilt'

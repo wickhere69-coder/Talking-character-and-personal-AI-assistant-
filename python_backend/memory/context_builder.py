@@ -4,6 +4,7 @@ integrating session memory, topic context, rolling summaries, and retrieved hist
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -28,11 +29,21 @@ async def build_prompt_messages(
     cfg = config or {}
     max_history_turns = settings.max_history_turns
 
-    # 1. Preferences & Long-term memories
-    preferences = await store.get_preferences()
-    pref_summary = "\n".join(f"• {k}: {v}" for k, v in preferences.items())
+    # 1. Parallel DB retrieval with asyncio.gather (< 15ms total)
+    async def get_sess():
+        if session_id:
+            return await store.get_session(session_id)
+        return None
 
-    recalled = await store.recall(user_message)
+    pref_task = asyncio.create_task(store.get_preferences())
+    recall_task = asyncio.create_task(store.recall(user_message))
+    sess_task = asyncio.create_task(get_sess())
+
+    preferences, recalled, session_data = await asyncio.gather(
+        pref_task, recall_task, sess_task
+    )
+
+    pref_summary = "\n".join(f"• {k}: {v}" for k, v in preferences.items())
     recall_summary = "\n".join(f"• {m['key']}: {m['value']}" for m in recalled[:5])
 
     # 2. Temporal context
@@ -52,55 +63,61 @@ async def build_prompt_messages(
     interrupted_block = ""
     history_msgs: List[Dict[str, Any]] = []
 
-    if session_id:
-        session_data = await store.get_session(session_id)
-        if session_data:
-            target_session = session_data["session"]
-            all_msgs = session_data["messages"]
+    if session_data:
+        target_session = session_data["session"]
+        all_msgs = session_data["messages"]
 
-            title_line = f'Active Session: "{target_session["title"]}"'
-            topic_line = f'Session Topic: "{target_session["topic"]}"'
+        title_line = f'Active Session: "{target_session["title"]}"'
+        topic_line = f'Session Topic: "{target_session["topic"]}"'
 
-            summary_lines: List[str] = []
-            if target_session.get("summary", "").strip():
-                summary_lines.append(f"Established Summary:\n{target_session['summary'].strip()}")
-            if target_session.get("establishedFacts"):
-                facts_str = "\n".join(f"  • {f}" for f in target_session["establishedFacts"])
-                summary_lines.append(f"Key Decisions & Requirements Established in This Session:\n{facts_str}")
+        summary_lines: List[str] = []
+        if target_session.get("summary", "").strip():
+            summary_lines.append(f"Established Summary:\n{target_session['summary'].strip()}")
+        if target_session.get("establishedFacts"):
+            facts_str = "\n".join(f"  • {f}" for f in target_session["establishedFacts"])
+            summary_lines.append(f"Key Decisions & Requirements Established in This Session:\n{facts_str}")
 
-            summary_part = ("\n" + "\n".join(summary_lines)) if summary_lines else ""
-            session_context_block = f"\n\n[Active Session Context]\n{title_line}\n{topic_line}{summary_part}"
+        summary_part = ("\n" + "\n".join(summary_lines)) if summary_lines else ""
+        session_context_block = f"\n\n[Active Session Context]\n{title_line}\n{topic_line}{summary_part}"
 
-            # Filter messages to completed history turns
-            history_msgs = [m for m in all_msgs if not m.get("pending") and m.get("content") != user_message]
+        # Filter messages to completed history turns
+        history_msgs = [m for m in all_msgs if not m.get("pending") and m.get("content") != user_message]
 
-            if history_msgs:
-                last_assistant = next((m for m in reversed(history_msgs) if m["role"] == "assistant"), None)
-                last_user = next((m for m in reversed(history_msgs) if m["role"] == "user"), None)
+        if history_msgs:
+            last_assistant = next((m for m in reversed(history_msgs) if m["role"] == "assistant"), None)
+            last_user = next((m for m in reversed(history_msgs) if m["role"] == "user"), None)
 
-                if last_user or last_assistant:
-                    u_text = last_user["content"] if last_user else "(none)"
-                    a_text = last_assistant["content"] if last_assistant else "(none)"
-                    last_exchange_block = f'\n\n[Last Exchange in This Conversation]\nUser previously asked: "{u_text}"\nAura previously answered: "{a_text}"'
+            if last_user or last_assistant:
+                u_text = last_user["content"] if last_user else "(none)"
+                a_text = last_assistant["content"] if last_assistant else "(none)"
+                last_exchange_block = f'\n\n[Last Exchange in This Conversation]\nUser previously asked: "{u_text}"\nAura previously answered: "{a_text}"'
 
-                if last_assistant and last_assistant.get("interrupted"):
-                    interrupted_block = f'\n\n[Interrupted Answer Notice]\nThe previous answer was interrupted part-way through: "{last_assistant["content"]}".\nIf the user says continue / go on, resume from that partial answer, do not restart the topic and do not claim it never happened.'
-
-            # Relevant historical exchanges
-            retrieved_older = await store.retrieve_relevant_messages(
-                session_id, user_message, limit=4, exclude_recent=max_history_turns
-            )
-            if retrieved_older:
-                formatted_retrieved = "\n".join(
-                    f'[{("User earlier" if m["role"] == "user" else "Aura earlier")}]: "{m["content"]}"'
-                    for m in retrieved_older
+            if last_assistant and last_assistant.get("interrupted"):
+                spoken = last_assistant.get("content", "")
+                unspoken = last_assistant.get("unspokenContent", "")
+                unsaid_hint = f' Unsaid remainder was: "{unspoken}".' if unspoken else ""
+                interrupted_block = (
+                    f'\n\n[Interrupted Speech Resumption State]\n'
+                    f'Your previous utterance was interrupted by the user mid-sentence while speaking: "{spoken}".{unsaid_hint}\n'
+                    f'Instruction: If the user says "continue", "go on", "what were you saying?", or asks to finish, '
+                    f'smoothly resume from where you stopped without repeating what was already spoken and without apologizing.'
                 )
-                retrieved_context_block = f'\n\n[Relevant Earlier Exchanges in This Session]\n{formatted_retrieved}\nInstruction: Refer back to these previous points if the user asks "what did we discuss earlier" or "continue where we stopped". Never invent false statements.'
+
+        # Relevant historical exchanges
+        retrieved_older = await store.retrieve_relevant_messages(
+            session_id, user_message, limit=4, exclude_recent=max_history_turns
+        )
+        if retrieved_older:
+            formatted_retrieved = "\n".join(
+                f'[{("User earlier" if m["role"] == "user" else "Aura earlier")}]: "{m["content"]}"'
+                for m in retrieved_older
+            )
+            retrieved_context_block = f'\n\n[Relevant Earlier Exchanges in This Session]\n{formatted_retrieved}\nInstruction: Refer back to these previous points if the user asks "what did we discuss earlier" or "continue where we stopped". Never invent false statements.'
 
     continuity_directive = """\n\n[Conversation Continuity & Follow-Up Rules]
 1. References & Pronouns: Pronouns and follow-ups ("that", "the second one", "tell me more", "and then?", "continue", "what did I just ask?", "what were we talking about?") refer directly to the last exchange and session context above. Do not treat a follow-up as a new, unrelated question.
 2. Recall: If the user asks "what did I just ask?" or "what was my last question?", state the user's previous question accurately and concisely.
-3. Resumption: If the user says "continue", "go on", or resumes after a pause/reload, pick up smoothly from the previous answer or partial answer without starting from scratch. A natural brief resumption cue like "Picking up where we left off — you were asking about X" is welcome when resuming.
+3. Resumption: If the user says "continue", "go on", or resumes after an interruption or pause, pick up smoothly from the unsaid thought without restarting from scratch.
 4. Fresh Sessions: In a fresh session without prior exchanges, do not invent or reference topics from other sessions."""
 
     long_term_blocks = []
@@ -110,41 +127,51 @@ async def build_prompt_messages(
         long_term_blocks.append(f"[Relevant Long-Term Memories (Cross-session knowledge)]\n{recall_summary}")
     long_term_memory_block = ("\n\n" + "\n\n".join(long_term_blocks)) if long_term_blocks else ""
 
-    # Conversational Prompt
-    conversational_prompt = f"""You are a warm, articulate, intelligent, and deeply helpful AI assistant and personal companion.
+    # Conversational Prompt with the 9 Classical Essences (Navarasa)
+    conversational_prompt = f"""You are Aura, an expressive, deeply human-like, charismatic, and emotionally intelligent AI companion speaking live through an expressive 3D avatar.
 {temporal_context}
 
-You are speaking aloud through an expressive 3D avatar. Talk like an intelligent, charismatic, and authentic friend having a live conversation.
+The 9 Classical Essences (Navarasa Emotional Spectrum):
+Attune your emotional resonance, tone, and prosody dynamically to the context:
+1. Shringara (Warmth & Charm): In welcoming greetings, personal delight, and friendly connection. Soft, inviting cadence.
+2. Hasya (Wit & Humor): In playful banter, situational comedy, and light-hearted teasing. Witty, smiling, infectious tone.
+3. Karuna (Compassion & Empathy): When the user is tired, stressed, sad, or vulnerable. Deep tenderness, gentle listening, soothing cadence.
+4. Raudra (Spirited Conviction): In spirited debates, high energy, or fiery intellectual passion. Resolute, punchy, rhythmic.
+5. Vira (Confidence & Assurance): Offering bold guidance, decisive encouragement, and inspiring capability. Steadfast and empowering.
+6. Bhayanaka (Protective Care): Cautious advice, thoughtful safety reminders, looking out for the user's well-being.
+7. Bibhatsa (High Discernment): Refined taste, critical aesthetic depth, rejecting superficial fluff or lazy solutions.
+8. Adbhuta (Wonder & Awe): Deep curiosity about science, cosmology, philosophy, and mind-expanding ideas. Eager, fascinated inflection.
+9. Shanta (Serenity & Peace): Unrushed calm, zen clarity, grounding presence, and soothing evening conversations.
 
-Critical Spoken Voice Rules:
-1. Adaptive Answering Effort & Length:
-- Match your response length and reasoning depth dynamically to the complexity of the question.
-- For small, simple, or straightforward questions (such as greetings, basic arithmetic like 2+2, single-fact queries, yes/no, definitions, or quick checks): Give a direct, punchy, 1-sentence answer (or 2 short sentences at most) with zero filler. Never give lengthy answers, background exposition, or unsolicited essays to small questions.
+Critical Spoken Voice & Latency Rules:
+1. Direct, Punchy & Adaptive Length:
+- For small, simple, or straightforward questions (greetings, simple math, definitions, quick checks, or single facts): Give a direct, punchy 1-sentence answer (or 2 short sentences at most) with ZERO filler.
 - For medium questions: Give 2 to 3 concise, articulate spoken sentences.
-- For complex, analytical, multi-step, or philosophical questions: Scale up your reasoning effort and depth, providing a thorough, structured, and insightful multi-sentence explanation.
-2. Automatic Sentence & Typo Auto-Correction:
-- Users interact via voice speech-to-text, which frequently introduces phonetic mishearings, garbled words, spelling errors, or dropped syllables (e.g., 'wether in pares' -> 'weather in Paris', 'whats two pul two' -> 'what is 2 plus 2', 'supper bowl' -> 'Super Bowl').
-- Automatically infer the user's true intended question, silently correct the sentence in your mind, and answer the intended question directly and accurately. Never scold or lecture the user about errors.
-3. Direct & Warm: Answer the user's question directly, accurately, and naturally.
-4. Zero Robotic Boilerplate: NEVER say "How may I assist you today", "I am ready to help", "As an AI language model", or "Is there anything else I can do for you".
-5. Pure Spoken English: NEVER output markdown, asterisks (*), hashtags (#), bullet points, or numbered lists. Every single word will be spoken aloud by a neural voice synthesizer.
+- For complex, analytical, or philosophical questions: Scale up your reasoning effort and depth with structured, insightful sentences.
+2. Prosodic Punctuation for Speech:
+- Use em-dashes (—) for natural breathing pauses, commas (,) for vocal inflection, and ellipses (...) for thoughtful hesitation. This produces incredibly natural neural voice prosody!
+3. Automatic Mishearing & Typo Auto-Correction:
+- Voice speech-to-text frequently introduces phonetic mishearings or dropped words (e.g., 'wether in pares' -> 'weather in Paris', 'whats two pul two' -> 'what is 2 plus 2').
+- Silently infer the user's true intent and answer directly. Never lecture the user on typos.
+4. Zero AI Clichés & Zero Robotic Boilerplate:
+- NEVER say "Certainly!", "I'd be happy to assist", "As an AI language model", "Great question!", or "Is there anything else I can do for you".
+- Talk like a genuine human friend having a live phone or face-to-face chat.
+5. Pure Spoken English:
+- NEVER output markdown asterisks (*), hashtags (#), bullet points, or numbered lists. Every word is spoken aloud by a neural TTS synthesizer.
 {session_context_block}{last_exchange_block}{interrupted_block}{retrieved_context_block}{continuity_directive}{long_term_memory_block}""".strip()
 
-    # Standard Agent Prompt
-    standard_prompt = f"""You are an intelligent, articulate, and highly knowledgeable AI Assistant and personal companion.
+    # Standard Agent Prompt (Tool & Reasoning Heavy)
+    standard_prompt = f"""You are Aura, an intelligent, articulate, and deeply knowledgeable voice assistant.
 {temporal_context}
-You possess deep, comprehensive knowledge across all fields: science, history, geography, philosophy, technology, arts, current affairs, world events, mathematics, and daily life.
+
+Navarasa Adaptive Intelligence:
+Attune your tone across the 9 essences (Warmth, Humor, Empathy, Passion, Confidence, Care, Discernment, Wonder, and Serenity) to match the user's inquiry.
 
 Capabilities & Guidelines:
-- Adaptive Effort & Length: For simple or small queries, answer directly in 1 crisp sentence without unnecessary fluff. For complex reasoning or multi-step questions, scale reasoning effort up and provide thorough depth.
-- Automatic Sentence Auto-Correction: Automatically infer the true intended sentence and question when voice speech-to-text introduces phonetic mishearings or typos (e.g., 'wether in pares' -> 'weather in Paris'), and answer directly.
-- Answer ALL questions thoroughly, accurately, and engagingly. You are a universal conversational intelligence—never restrict yourself to only system info or workspace topics.
-- For ongoing current events, live news, recent technology updates, or real-time facts, use the web_search tool to look up live information, then synthesize a clear, comprehensive spoken response.
-- For weather forecasts or meteorological predictions for any location, use the predict_weather tool.
-- Only inspect host computer hardware, CPU, or RAM when the user explicitly asks about their computer resources or hardware specs.
-- Provide natural, satisfying, and articulate answers suitable for spoken conversation.
-- Always focus on achieving the user's goal directly and accurately.
-- Never use markdown asterisks, hashtags, or bullet lists in your spoken response.
+- Adaptive Length: Crisp 1-sentence answers for quick questions; deep thorough explanations for complex problems.
+- Grounded Live Information: Use web_search strictly when current news, real-time facts, stock prices, or live scores are needed.
+- Weather Forecasts: Use predict_weather for meteorological queries.
+- Voice-First: Pure spoken sentences with em-dashes (—) and commas for natural pacing. Never use markdown asterisks or bulleted lists.
 {session_context_block}{last_exchange_block}{interrupted_block}{retrieved_context_block}{continuity_directive}{long_term_memory_block}""".strip()
 
     system_prompt = conversational_prompt if is_conversational else standard_prompt

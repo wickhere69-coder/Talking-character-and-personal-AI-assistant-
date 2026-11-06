@@ -94,11 +94,18 @@ class MemoryStore:
                     model_used TEXT,
                     audio_duration_ms INTEGER,
                     interrupted INTEGER DEFAULT 0,
+                    unspoken_content TEXT DEFAULT '',
                     pending INTEGER DEFAULT 0,
                     attachment TEXT DEFAULT '{}',
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 );
             """)
+
+            # Ensure unspoken_content column exists for existing DBs
+            try:
+                await conn.execute("ALTER TABLE messages ADD COLUMN unspoken_content TEXT DEFAULT '';")
+            except Exception:
+                pass
 
             # 3. Memories / Key-Value facts
             await conn.execute("""
@@ -518,8 +525,8 @@ class MemoryStore:
 
             await conn.execute("""
                 INSERT INTO messages 
-                (id, session_id, role, content, created_at, status, model_used, audio_duration_ms, interrupted, pending, attachment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, session_id, role, content, created_at, status, model_used, audio_duration_ms, interrupted, unspoken_content, pending, attachment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 msg_id,
                 session_id,
@@ -530,6 +537,7 @@ class MemoryStore:
                 extra.get("modelUsed"),
                 extra.get("audioDurationMs"),
                 1 if extra.get("interrupted") else 0,
+                extra.get("unspoken_content") or extra.get("unspokenContent", ""),
                 1 if extra.get("pending") else 0,
                 json.dumps(extra.get("attachment", {})),
             ))
@@ -579,10 +587,96 @@ class MemoryStore:
                     "modelUsed": m["model_used"],
                     "audioDurationMs": m["audio_duration_ms"],
                     "interrupted": bool(m["interrupted"]),
+                    "unspokenContent": m["unspoken_content"] if "unspoken_content" in m.keys() else "",
                     "pending": bool(m["pending"]),
                 }
                 for m in rows
             ]
+
+    async def mark_message_interrupted(
+        self,
+        session_id: str,
+        message_id: Optional[str] = None,
+        spoken_content: Optional[str] = None,
+        unspoken_content: Optional[str] = None,
+    ) -> bool:
+        """Mark an assistant message as interrupted by user barge-in."""
+        async with self.get_connection() as conn:
+            target_id = message_id
+            if not target_id:
+                # Find most recent assistant message
+                cursor = await conn.execute(
+                    "SELECT id, content FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+                    (session_id,)
+                )
+                row = await cursor.fetchone()
+                if not row:
+                    # Auto-create session if missing and insert assistant message
+                    cursor = await conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+                    if not await cursor.fetchone():
+                        now = int(time.time() * 1000)
+                        await conn.execute("""
+                            INSERT INTO sessions (id, title, topic, created_at, updated_at, message_count)
+                            VALUES (?, 'Conversation', 'General', ?, ?, 0)
+                        """, (session_id, now, now))
+
+                    now = int(time.time() * 1000)
+                    import secrets
+                    new_id = f"msg_a_{now}_{secrets.token_hex(3)}"
+                    await conn.execute("""
+                        INSERT INTO messages (id, session_id, role, content, created_at, status, interrupted, unspoken_content)
+                        VALUES (?, ?, 'assistant', ?, ?, 'delivered', 1, ?)
+                    """, (new_id, session_id, (spoken_content or '').strip(), now, (unspoken_content or '').strip()))
+                    await conn.commit()
+                    return True
+                target_id = row["id"]
+                current_text = row["content"]
+            else:
+                cursor = await conn.execute("SELECT content FROM messages WHERE id = ?", (target_id,))
+                row = await cursor.fetchone()
+                current_text = row["content"] if row else ""
+
+            fields = ["interrupted = 1"]
+            params: List[Any] = []
+
+            if spoken_content is not None and spoken_content.strip():
+                fields.append("content = ?")
+                params.append(spoken_content.strip())
+            
+            if unspoken_content is not None:
+                fields.append("unspoken_content = ?")
+                params.append(unspoken_content.strip())
+            elif spoken_content and current_text:
+                # Calculate remaining unspoken text
+                if current_text.startswith(spoken_content.strip()):
+                    rem = current_text[len(spoken_content.strip()):].strip()
+                    fields.append("unspoken_content = ?")
+                    params.append(rem)
+
+            params.append(target_id)
+            set_clause = ", ".join(fields)
+            await conn.execute(f"UPDATE messages SET {set_clause} WHERE id = ?", tuple(params))
+            await conn.commit()
+            return True
+
+    async def get_last_interrupted_message(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve the latest interrupted assistant message in a session for resumption context."""
+        async with self.get_connection() as conn:
+            cursor = await conn.execute(
+                """SELECT * FROM messages 
+                   WHERE session_id = ? AND role = 'assistant' AND interrupted = 1 
+                   ORDER BY created_at DESC LIMIT 1""",
+                (session_id,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "content": row["content"],
+                "unspokenContent": row["unspoken_content"] if "unspoken_content" in row.keys() else "",
+                "createdAt": row["created_at"],
+            }
 
     async def update_rolling_summary(
         self,

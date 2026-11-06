@@ -102,7 +102,7 @@ export class ProceduralAnimation {
     this.meshes = meshes;
   }
 
-  update(delta: number, isSpeaking: boolean, agentStatus = 'idle'): void {
+  update(delta: number, isSpeaking: boolean, agentStatus = 'idle', emotion: string = 'neutral'): void {
     const isThinking = agentStatus === 'thinking' || agentStatus === 'executing_tool';
     const isListening = agentStatus === 'listening';
 
@@ -116,8 +116,8 @@ export class ProceduralAnimation {
 
     this.updateBlink(delta);
     this.updateBreathing(delta);
-    this.updateHeadAndNeck(delta, isSpeaking, agentStatus);
-    this.updateExpression(delta, isSpeaking, agentStatus);
+    this.updateHeadAndNeck(delta, isSpeaking, agentStatus, emotion);
+    this.updateExpression(delta, isSpeaking, agentStatus, emotion);
     this.updateGaze(delta, agentStatus);
     this.updateNaturalStandingPose(delta, isSpeaking);
   }
@@ -165,7 +165,7 @@ export class ProceduralAnimation {
     }
   }
 
-  private updateHeadAndNeck(delta: number, isSpeaking: boolean, agentStatus = 'idle'): void {
+  private updateHeadAndNeck(delta: number, isSpeaking: boolean, agentStatus = 'idle', emotion: string = 'neutral'): void {
     this.headSwayPhaseX += delta * (Math.PI * 2) * 0.28;
     this.headSwayPhaseY += delta * (Math.PI * 2) * 0.20;
     this.headSwayPhaseZ += delta * (Math.PI * 2) * 0.14;
@@ -198,7 +198,8 @@ export class ProceduralAnimation {
     if (this.isNodding) {
       this.nodPhase += delta * Math.PI * 2.5;
       this.nodIntensity = THREE.MathUtils.damp(this.nodIntensity, 1.0, 8, delta);
-      const amplitude = isSpeaking ? 0.035 : 0.022; // subtle, calm micro-nod
+      const isLively = emotion === 'hasya' || emotion === 'amused' || emotion === 'excited';
+      const amplitude = isSpeaking ? (isLively ? 0.045 : 0.035) : 0.022; // subtle, calm micro-nod
       nodOffset = this.nodIntensity * Math.sin(this.nodPhase) * amplitude;
       if (this.nodPhase > Math.PI * 4) {
         this.isNodding = false;
@@ -206,7 +207,7 @@ export class ProceduralAnimation {
       }
     }
 
-    // Agent behavioral tilt
+    // Agent behavioral tilt & Navarasa expressive head postures
     let agentTiltZ = 0;
     let agentTiltX = 0;
     if (agentStatus === 'thinking' || agentStatus === 'executing_tool') {
@@ -217,6 +218,18 @@ export class ProceduralAnimation {
       agentTiltZ = 0.015; // natural engaged head angle
     } else if (agentStatus === 'awaiting_confirmation') {
       agentTiltZ = 0.025;
+    }
+
+    // Navarasa-specific subtle head attitudes
+    if (emotion === 'karuna' || emotion === 'empathetic') {
+      agentTiltZ += 0.022; // tender compassionate tilt
+    } else if (emotion === 'adbhuta' || emotion === 'curious') {
+      agentTiltZ += 0.018; // inquisitive tilt
+      agentTiltX += 0.012;
+    } else if (emotion === 'hasya' || emotion === 'amused') {
+      agentTiltZ -= 0.015; // playful head tilt
+    } else if (emotion === 'vira' || emotion === 'confident') {
+      agentTiltX -= 0.012; // confident upright chin
     }
 
     // Natural cervical head & neck rotation (neck 30%, head 70%)
@@ -239,16 +252,76 @@ export class ProceduralAnimation {
     }
   }
 
-  private updateExpression(delta: number, isSpeaking: boolean, agentStatus = 'idle'): void {
-    // Warm, friendly subtle resting smile matching Image 2
-    const targetSmile = isSpeaking ? 0.06 : 0.12;
+  private updateExpression(delta: number, isSpeaking: boolean, agentStatus = 'idle', emotion: string = 'neutral'): void {
+    // Navarasa 9-Essence facial blendshape modulation
+    let targetSmile = isSpeaking ? 0.08 : 0.12;
+    let targetInnerUp = 0;
+    let targetSquint = 0;
+    let targetWide = 0;
+
+    switch (emotion) {
+      case 'shringara':
+      case 'happy':
+        targetSmile = isSpeaking ? 0.16 : 0.22;
+        targetSquint = 0.08;
+        break;
+      case 'hasya':
+      case 'amused':
+        targetSmile = isSpeaking ? 0.22 : 0.28;
+        targetSquint = 0.12;
+        break;
+      case 'karuna':
+      case 'empathetic':
+        targetSmile = 0.04;
+        targetInnerUp = 0.20; // gentle compassionate brow raise
+        break;
+      case 'adbhuta':
+      case 'curious':
+      case 'surprised':
+        targetInnerUp = 0.22;
+        targetWide = 0.14;
+        targetSmile = 0.10;
+        break;
+      case 'vira':
+      case 'confident':
+        targetSmile = 0.10;
+        break;
+      case 'bhayanaka':
+      case 'concerned':
+        targetInnerUp = 0.14;
+        targetWide = 0.10;
+        targetSmile = 0.03;
+        break;
+      case 'bibhatsa':
+      case 'thoughtful':
+        targetInnerUp = 0.10;
+        targetSmile = 0.05;
+        break;
+      case 'raudra':
+      case 'excited':
+        targetSmile = 0.14;
+        targetWide = 0.08;
+        break;
+      case 'shanta':
+      case 'neutral':
+      default:
+        targetSmile = isSpeaking ? 0.06 : 0.10;
+        break;
+    }
+
+    // Dynamic mouth smile
     this.applyBlendShape('mouthSmileLeft', targetSmile);
     this.applyBlendShape('mouthSmileRight', targetSmile);
 
+    // Dynamic eyes squint & wide
+    this.applyBlendShape('eyeSquintLeft', targetSquint);
+    this.applyBlendShape('eyeSquintRight', targetSquint);
+    this.applyBlendShape('eyeWideLeft', targetWide);
+    this.applyBlendShape('eyeWideRight', targetWide);
+
     // Subtle eyebrow lift on open vowels during speech OR while thinking
-    let targetInnerUp = 0;
     if (agentStatus === 'thinking' || agentStatus === 'executing_tool') {
-      targetInnerUp = 0.16; // curious/thinking eyebrow raise
+      targetInnerUp = Math.max(targetInnerUp, 0.16); // curious/thinking eyebrow raise
     } else if (isSpeaking) {
       let jawOpen = 0;
       if (this.meshes.length > 0 && this.meshes[0].morphTargetDictionary) {
@@ -258,7 +331,7 @@ export class ProceduralAnimation {
         }
       }
       if (jawOpen > 0.35) {
-        targetInnerUp = 0.15;
+        targetInnerUp = Math.max(targetInnerUp, 0.15);
       }
     }
     

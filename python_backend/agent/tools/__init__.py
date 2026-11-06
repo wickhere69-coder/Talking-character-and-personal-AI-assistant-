@@ -202,11 +202,14 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
     """Keyword-based tool filtering, matching TypeScript AgentCore logic."""
     lower = user_message.lower().strip()
 
-    # Fast check: common greetings need zero tools
+    # Fast check: common greetings & casual chat need zero tools (< 1ms fast-path)
     common_chat = [
         "hello", "hi", "hey", "how are you", "what is your name",
         "who are you", "tell me a joke", "good morning", "good evening",
-        "thank you", "thanks", "bye", "goodbye"
+        "good night", "thank you", "thanks", "bye", "goodbye", "how do you feel",
+        "what do you think", "tell me about yourself", "are you there",
+        "what's up", "whats up", "how's it going", "hows it going",
+        "continue", "go on", "what were you saying", "finish your thought"
     ]
     if any(lower == c or lower.startswith(c + " ") or lower.endswith(" " + c) for c in common_chat):
         return []
@@ -226,11 +229,11 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
     ]
     web_keywords = [
         "search online", "search the web", "search google", "search for news",
-        "google", "browse", "lookup", "look up", "find online",
+        "google", "browse", "lookup", "look up", "find online", "search for",
         "latest news", "current news", "breaking news", "recent news", "today's news",
-        "what is happening", "what happened", "who is", "who won", "current price",
-        "stock price", "latest update", "recent events", "current event", "ongoing",
-        "election", "championship", "tournament", "world cup", "space exploration"
+        "what is happening today", "who won", "current price of",
+        "stock price", "latest update on", "recent events", "current events",
+        "election results", "super bowl", "championship winner", "world cup score"
     ]
 
     matched: set[str] = set()
@@ -243,11 +246,6 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
         matched.update(["predict_weather", "get_weather"])
     if any(kw in lower for kw in web_keywords):
         matched.update(["web_search", "fetch_webpage"])
-
-    # Cloud models always have web search available for general knowledge/current affairs
-    if provider_name in ("auto", "gemini", "grok", "langgraph"):
-        matched.add("web_search")
-        matched.add("fetch_webpage")
 
     return [t for t in TOOL_DEFINITIONS if t["name"] in matched]
 

@@ -50,6 +50,13 @@ async def pre_fetch_node(state: AgentState) -> Dict[str, Any]:
     tool_results: List[Dict[str, Any]] = list(state.get("tool_results", []))
     injected_messages: List[BaseMessage] = []
 
+    # Fast-path: if no tools are available, return immediately (< 0.1ms)
+    if not available_tools:
+        return {
+            "tool_results": tool_results,
+            "messages": injected_messages,
+        }
+
     # 1. Weather pre-fetch optimization
     if "predict_weather" in available_tools:
         location = extract_location_from_query(user_msg)
@@ -73,13 +80,16 @@ async def pre_fetch_node(state: AgentState) -> Dict[str, Any]:
                     logger.warning("Pre-fetch weather failed: %s", exc)
 
     # 2. Live Web Search pre-fetch optimization
-    # Triggers for explicit search requests or live real-time queries (news, current events, who won, latest, scores)
+    # Requires explicit search intents or live real-time queries (news, current events, scores, stock prices)
     search_keywords = re.compile(
-        r"\b(search|look up|google|find online|browse|news|latest|today|current|recent|"
-        r"who is|who won|score|winner|what happened|stock|price|election|super bowl|championship)\b",
+        r"(?:\b(?:search\s+(?:the\s+web|online|google|for)|look\s+up|google|find\s+online|browse\s+the\s+web)\b|"
+        r"\b(?:latest|breaking|today's|current|recent)\s+(?:news|events|updates|headlines)\b|"
+        r"\b(?:stock|crypto|share)\s+price\b|"
+        r"\b(?:who\s+won|match\s+score|game\s+score|election\s+results|championship\s+winner|super\s+bowl)\b)",
         re.IGNORECASE
     )
-    is_search = bool(search_keywords.search(user_msg) or "search" in user_msg.lower() or "online" in user_msg.lower())
+    is_explicit_deep_think = bool(state.get("config", {}).get("deepThink"))
+    is_search = bool(search_keywords.search(user_msg) or is_explicit_deep_think)
     if "web_search" in available_tools and is_search:
         logger.info("Auto-enabling Deep Think web search for query: %s", user_msg[:60])
         web_tool = TOOL_REGISTRY.get("web_search")

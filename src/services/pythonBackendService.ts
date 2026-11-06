@@ -356,13 +356,14 @@ class PythonBackendService {
   }
 
   /**
-   * Cancel an in-flight request on the backend.
+   * Cancel an in-flight request on the backend with optional spoken content recorded for resumption.
    */
-  public cancel(requestId: string): void {
+  public cancel(requestId: string, spokenContent?: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'cancel',
         request_id: requestId,
+        spoken_content: spokenContent || '',
       }));
     }
     // Remove from pending queue

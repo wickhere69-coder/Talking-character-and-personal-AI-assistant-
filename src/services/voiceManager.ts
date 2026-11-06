@@ -46,7 +46,31 @@ class VoicePlaybackManager {
   private queueSessionId: number = 0;
   private onQueueEmptyCallback: (() => void) | null = null;
   private currentSentenceEndCallback: (() => void) | null = null;
+  private onSentenceStartCallback: ((sentenceText: string) => void) | null = null;
   private isQueueMode: boolean = false;
+  private currentlyPlayingSentence: string = '';
+
+  public getCurrentlySpokenText(): string {
+    return this.currentlyPlayingSentence || useAppStore.getState().speechText || '';
+  }
+
+  /**
+   * Instant barge-in polite chirp (e.g. "Oh, go ahead!")
+   */
+  public async playChirp(text: string = "Oh, go ahead!"): Promise<void> {
+    this.stopAll('chirp');
+    const sessionId = this.currentSessionId;
+    const voice = this.resolveCurrentVoice();
+    const chirpUrl = `/api/chirp?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}`;
+    try {
+      this.activeChannel = 'audio';
+      const store = useAppStore.getState();
+      store.setAudioUrl(chirpUrl);
+      await this.playAudioWithSync(chirpUrl, sessionId, text);
+    } catch {
+      this.playWithWebSpeech(text, voice, sessionId);
+    }
+  }
 
   public setOnPlaybackEnd(cb: (() => void) | null): void {
     this.onPlaybackEndCallback = cb;
@@ -60,6 +84,7 @@ class VoicePlaybackManager {
     this.audioElement = el;
     if (this.audioElement) {
       this.audioElement.onended = () => {
+        this.currentlyPlayingSentence = '';
         if (this.activeChannel === 'audio') {
           // Seamless transition: only reset speaking and playback state if conversational queue is truly done
           const hasMoreSentences = this.isQueueMode && (this.sentenceQueue.length > 0 || this.isStreamActive || this.isProcessingQueue);
@@ -146,10 +171,12 @@ class VoicePlaybackManager {
     }
     this.activeBlobUrls = [];
     this.sentenceQueue = [];
+    this.currentlyPlayingSentence = '';
     this.isProcessingQueue = false;
     this.isStreamActive = false;
     this.currentSentenceEndCallback = null;
     this.onQueueEmptyCallback = null;
+    this.onSentenceStartCallback = null;
     this.isQueueMode = false;
 
     // 1. Abort any in-flight TTS API requests
@@ -205,11 +232,16 @@ class VoicePlaybackManager {
   /**
    * Start a streaming conversational turn session.
    * Ensures the turn doesn't prematurely complete while LLM tokens are still arriving.
+   * Optionally receives onSentenceStart callback fired at the exact millisecond audio leaves speakers.
    */
-  public startStreamSession(onTurnComplete?: () => void): void {
+  public startStreamSession(
+    onTurnComplete?: () => void,
+    onSentenceStart?: (sentenceText: string) => void
+  ): void {
     this.isStreamActive = true;
     this.isQueueMode = true;
     this.onQueueEmptyCallback = onTurnComplete || null;
+    this.onSentenceStartCallback = onSentenceStart || null;
   }
 
   public resolveCurrentVoice(): VoiceOption {
@@ -274,10 +306,12 @@ class VoicePlaybackManager {
     }
     this.activeBlobUrls = [];
     this.sentenceQueue = [];
+    this.currentlyPlayingSentence = '';
     this.isProcessingQueue = false;
     this.queueSessionId++;
     this.currentSentenceEndCallback = null;
     this.onQueueEmptyCallback = null;
+    this.onSentenceStartCallback = null;
     this.isQueueMode = false;
   }
 
@@ -478,12 +512,16 @@ class VoicePlaybackManager {
         settled = true;
         cleanup();
         if (sessionId === this.currentSessionId) {
+          this.currentlyPlayingSentence = textToDisplay || '';
           store.setPlaybackState('playing');
           store.setIsSpeaking(true);
           if (textToDisplay) {
             store.setSpeechText(textToDisplay);
             store.setCurrentSentence(textToDisplay);
             store.setCurrentWordIndex(0);
+          }
+          if (this.onSentenceStartCallback && textToDisplay) {
+            this.onSentenceStartCallback(textToDisplay);
           }
         }
         resolve();
@@ -690,6 +728,11 @@ class VoicePlaybackManager {
         if (sessionId !== this.currentSessionId) return;
         store.setPlaybackState('playing');
         store.setIsSpeaking(true);
+        store.setSpeechText(text);
+        store.setCurrentSentence(text);
+        if (this.onSentenceStartCallback) {
+          this.onSentenceStartCallback(text);
+        }
       },
       onEnd: () => {
         if (sessionId !== this.currentSessionId) return;
