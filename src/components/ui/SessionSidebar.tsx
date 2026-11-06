@@ -269,6 +269,28 @@ export default function SessionSidebar({ onSessionSelect, compact = false }: Ses
         <span className="tracking-tight">+ New Session</span>
       </button>
 
+      {/* ── Search Chats Input with Instant Clear ── */}
+      <div className="relative w-full">
+        <Search size={14} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7A7D86]" />
+        <input
+          type="text"
+          value={sessionSearchQuery}
+          onChange={(e) => setSessionSearchQuery(e.target.value)}
+          placeholder="Search chats..."
+          className="w-full h-8 pl-8 pr-7 bg-[#1A1D27] border border-[#2A2E3B] focus:border-[#8B7CFF]/60 rounded-[8px] text-[12px] text-[#F2F2F2] placeholder-[#7A7D86] outline-none transition font-sans"
+        />
+        {sessionSearchQuery && (
+          <button
+            type="button"
+            onClick={() => setSessionSearchQuery('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[#7A7D86] hover:text-white p-0.5 rounded transition cursor-pointer"
+            title="Clear search"
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
       {/* ── Scrollable Grouped Session List ── */}
       <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2.5 pr-0.5">
         {isLoadingSessions ? (

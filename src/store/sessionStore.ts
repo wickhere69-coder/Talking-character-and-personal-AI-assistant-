@@ -6,7 +6,8 @@ import {
   getSession as apiGetSession,
   updateSession as apiUpdateSession,
   deleteSession as apiDeleteSession,
-  triggerSessionSummarize
+  triggerSessionSummarize,
+  sessionIDB
 } from '@/services/sessionService';
 
 const ACTIVE_SESSION_STORAGE_KEY = 'talking_character_active_session_id';
@@ -108,38 +109,81 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     // Immediately stop any existing speaking or voice playback from the old session
     window.dispatchEvent(new CustomEvent('session-switch', { detail: { newSessionId: id, oldSessionId: currentActive } }));
 
-    set({ activeSessionId: id, isLoadingMessages: true, error: null });
+    // Instant local cache rendering from IndexedDB (0ms)
+    const cached = await sessionIDB.getCachedMessages(id);
+    set({
+      activeSessionId: id,
+      activeMessages: cached,
+      isLoadingMessages: cached.length === 0,
+      error: null,
+    });
+
     try {
       const data = await apiGetSession(id);
       set({
         activeMessages: data.messages || [],
-        // Update session in list if updated
-        sessions: get().sessions.map(s => s.id === id ? data.session : s)
+        sessions: get().sessions.map(s => s.id === id ? data.session : s),
+        isLoadingMessages: false,
       });
     } catch (err: any) {
       console.error('[SessionStore] selectSession error:', err);
-      set({ error: err?.message || 'Failed to open session' });
-    } finally {
-      set({ isLoadingMessages: false });
+      set({ error: err?.message || 'Failed to open session', isLoadingMessages: false });
     }
   },
 
   createNewSession: async (title?: string, topic?: string) => {
-    set({ isLoadingSessions: true, error: null });
-    try {
-      const created = await apiCreateSession(title, topic);
-      set((state) => ({
-        sessions: [created, ...state.sessions.filter(s => s.id !== created.id)]
-      }));
-      await get().selectSession(created.id);
-      return created;
-    } catch (err: any) {
-      console.error('[SessionStore] createNewSession error:', err);
-      set({ error: err?.message || 'Failed to create session' });
-      throw err;
-    } finally {
-      set({ isLoadingSessions: false });
+    const now = Date.now();
+    const tempId = `session_${now}_${Math.random().toString(36).substring(2, 8)}`;
+    const optimistic: ChatSession = {
+      id: tempId,
+      title: (title || 'New Conversation').trim(),
+      topic: (topic || 'General').trim(),
+      summary: '',
+      establishedFacts: [],
+      createdAt: now,
+      updatedAt: now,
+      pinned: false,
+      pinnedAt: null,
+      archived: false,
+      archivedAt: null,
+      messageCount: 0,
+    };
+
+    // INSTANT UI UPDATE (0ms perceived latency)
+    set((state) => ({
+      sessions: [optimistic, ...state.sessions.filter(s => s.id !== tempId)],
+      activeSessionId: tempId,
+      activeMessages: [],
+      isLoadingSessions: false,
+      isLoadingMessages: false,
+      error: null,
+    }));
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, tempId);
+      } catch {}
     }
+
+    // Switch session context cleanly in 0ms without tearing down WebSocket
+    window.dispatchEvent(new CustomEvent('session-switch', { detail: { newSessionId: tempId } }));
+
+    // Persist to backend in background asynchronously
+    apiCreateSession(title, topic).then((persisted) => {
+      set((state) => ({
+        sessions: state.sessions.map((s) => (s.id === tempId ? persisted : s)),
+        activeSessionId: state.activeSessionId === tempId ? persisted.id : state.activeSessionId,
+      }));
+      if (typeof window !== 'undefined' && get().activeSessionId === persisted.id) {
+        try {
+          localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, persisted.id);
+        } catch {}
+      }
+    }).catch((err) => {
+      console.warn('[SessionStore] Background session persist notice:', err);
+    });
+
+    return optimistic;
   },
 
   renameSession: async (id: string, newTitle: string) => {

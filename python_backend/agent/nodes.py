@@ -1,133 +1,79 @@
-"""LangGraph node implementations for the Aura Agent."""
+"""LangGraph node implementations for the Aura Agent.
+
+Flow:  route_tools → pre_fetch → llm ⇄ execute_tools → END
+  * route_tools  picks a small relevant tool set for this turn (fewer tools = faster, better choices)
+  * pre_fetch    runs obvious lookups (weather / web) in parallel *before* the LLM so the answer
+                 can stream on the first model call instead of after a tool round-trip
+  * llm          streams from the strongest healthy model (see ModelRouter) with tools bound
+  * execute_tools runs requested tools concurrently with timeouts, then loops back to llm
+"""
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages.utils import message_chunk_to_message
 from langchain_core.runnables import RunnableConfig
 
-from agent.providers.provider_manager import ProviderManager
+from agent.providers.provider_manager import AllModelsFailedError, ProviderManager
 from agent.state import AgentState
 from agent.tools import TOOL_REGISTRY, extract_location_from_query, select_relevant_tools
+from config import get_settings
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+MAX_TOOL_ITERATIONS = 3
+TOOL_TIMEOUT_S = 12.0
+OVERLOADED_REPLY = "Sorry — my brain's a bit overloaded for a second there. Mind asking me that again?"
 
-async def route_tools_node(state: AgentState) -> Dict[str, Any]:
-    """Inspects the latest user message and determines available tools."""
-    messages = state.get("messages", [])
-    user_msg = ""
+_SEARCH_PATTERN = re.compile(
+    r"(?:\b(?:search(?:\s+about|\s+for|\s+the\s+web|\s+online|\s+google)?|look\s*up|google|browse|find\s*(?:out|online))\b|"
+    r"\b(?:latest|breaking|today's|current|recent)\s+(?:news|events|updates|headlines|status)\b|"
+    r"\b(?:stock|crypto|share)\s+price\b|"
+    r"\b(?:who\s+won|match\s+score|game\s+score|election\s+results|championship\s+winner|super\s+bowl)\b|"
+    r"\b(?:what\s+happened\s+to|what\s+is\s+the\s+latest\s+on)\b)",
+    re.IGNORECASE,
+)
+_SEARCH_PREFIX = re.compile(
+    r"^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:search(?:\s+for|\s+about|\s+the\s+web\s+for|\s+online\s+for)?|"
+    r"look\s*up|google|browse|find\s*(?:out\s+about|online\s+about|out)?)\s*",
+    re.IGNORECASE,
+)
+
+
+# ── helpers ──────────────────────────────────────────────────────────────
+
+def _sink(config: Optional[RunnableConfig]) -> Any:
+    if not config:
+        return None
+    return (config.get("configurable") or {}).get("sink")
+
+
+async def _emit(sink: Any, method: str, *args: Any) -> None:
+    fn = getattr(sink, method, None) if sink else None
+    if not fn:
+        return
+    try:
+        res = fn(*args)
+        if asyncio.iscoroutine(res):
+            await res
+    except Exception as exc:  # a broken client socket must not kill the turn
+        logger.debug("sink.%s failed: %s", method, exc)
+
+
+def _latest_user_text(messages: List[BaseMessage]) -> str:
     for m in reversed(messages):
-        if isinstance(m, HumanMessage) or getattr(m, "role", None) == "user":
-            user_msg = str(m.content)
-            break
-
-    cfg = state.get("config", {})
-    provider_name = cfg.get("modelProvider", "auto")
-    tools = select_relevant_tools(user_msg, provider_name=provider_name)
-    logger.debug("route_tools_node matched %d tools for query: %s", len(tools), user_msg[:50])
-
-    return {
-        "config": {**cfg, "available_tools": [t["name"] for t in tools]},
-    }
-
-
-async def pre_fetch_node(state: AgentState) -> Dict[str, Any]:
-    """Pre-fetch weather or web results before LLM call for ultra-fast spoken response.
-    Mirrors AgentCore.ts weather/search pre-fetch optimization.
-    """
-    messages = state.get("messages", [])
-    user_msg = ""
-    for m in reversed(messages):
-        if isinstance(m, HumanMessage) or getattr(m, "role", None) == "user":
-            user_msg = str(m.content)
-            break
-
-    available_tools = state.get("config", {}).get("available_tools", [])
-    tool_results: List[Dict[str, Any]] = list(state.get("tool_results", []))
-    injected_messages: List[BaseMessage] = []
-
-    # Fast-path: if no tools are available, return immediately (< 0.1ms)
-    if not available_tools:
-        return {
-            "tool_results": tool_results,
-            "messages": injected_messages,
-        }
-
-    # 1. Weather pre-fetch optimization
-    if "predict_weather" in available_tools:
-        location = extract_location_from_query(user_msg)
-        if location:
-            logger.debug("Pre-fetching weather for location: %s", location)
-            weather_tool = TOOL_REGISTRY.get("predict_weather")
-            if weather_tool:
-                try:
-                    res = await weather_tool["func"](location)
-                    tool_results.append({
-                        "name": "predict_weather",
-                        "parameters": {"location": location},
-                        "result": res,
-                    })
-                    msg = (
-                        f"[Pre-fetched Live Weather Context]: For {location}: "
-                        f"{res.get('message', '')}. Use this information directly in your spoken answer."
-                    )
-                    injected_messages.append(SystemMessage(content=msg))
-                except Exception as exc:
-                    logger.warning("Pre-fetch weather failed: %s", exc)
-
-    # 2. Live Web Search pre-fetch optimization
-    # Catches explicit search intents or live real-time queries (news, current events, scores, stock prices)
-    search_keywords = re.compile(
-        r"(?:\b(?:search(?:\s+about|\s+for|\s+the\s+web|\s+online|\s+google)?|look\s*up|google|browse|find\s*(?:out|online))\b|"
-        r"\b(?:latest|breaking|today's|current|recent)\s+(?:news|events|updates|headlines|status)\b|"
-        r"\b(?:stock|crypto|share)\s+price\b|"
-        r"\b(?:who\s+won|match\s+score|game\s+score|election\s+results|championship\s+winner|super\s+bowl)\b|"
-        r"\b(?:who\s+is|who\s+was|what\s+happened\s+to|what\s+is\s+the\s+latest\s+on)\b)",
-        re.IGNORECASE
-    )
-    is_explicit_deep_think = bool(state.get("config", {}).get("deepThink"))
-    is_search = bool(search_keywords.search(user_msg) or is_explicit_deep_think)
-    if "web_search" in available_tools and is_search:
-        clean_search_query = re.sub(
-            r"^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:search(?:\s+for|\s+about|\s+the\s+web\s+for|\s+online\s+for)?|look\s*up|google|browse|find\s*(?:out\s+about|online\s+about|out)?)\s*",
-            "",
-            user_msg,
-            flags=re.IGNORECASE
-        ).strip().rstrip("?.!")
-        search_target = clean_search_query if clean_search_query and len(clean_search_query) > 1 else user_msg
-
-        logger.info("Auto-enabling Deep Think web search for query: '%s' (extracted: '%s')", user_msg[:60], search_target)
-        web_tool = TOOL_REGISTRY.get("web_search")
-        if web_tool:
-            try:
-                res = await web_tool["func"](query=search_target)
-                if res.get("success") and res.get("message"):
-                    tool_results.append({
-                        "name": "web_search",
-                        "parameters": {"query": search_target},
-                        "result": res,
-                    })
-                    msg = (
-                        f"[Live Web Search Ground Truth]: Real-time search findings for '{search_target}':\n"
-                        f"{res.get('message', '')}\n"
-                        f"Synthesize an articulate, accurate spoken response using these live facts."
-                    )
-                    injected_messages.append(SystemMessage(content=msg))
-            except Exception as exc:
-                logger.warning("Live web search prefetch notice: %s", exc)
-
-    return {
-        "tool_results": tool_results,
-        "messages": injected_messages,
-    }
+        if isinstance(m, HumanMessage):
+            return extract_text_content(m.content)
+    return ""
 
 
 def extract_text_content(content: Any) -> str:
-    """Extract plain text string from str, list of blocks, or dict."""
+    """Extract plain text from str, a list of content blocks, or a dict block."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -140,134 +86,222 @@ def extract_text_content(content: Any) -> str:
         return "".join(parts)
     if isinstance(content, dict) and content.get("type") == "text":
         return content.get("text", "")
-    return str(content or "")
+    return ""
 
 
-async def llm_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
-    """Calls the selected LLM with streaming and tool awareness."""
-    cfg = state.get("config", {})
-    provider_override = cfg.get("modelProvider")
-    mgr = ProviderManager()
-    llm = mgr.get_llm(provider_override=provider_override)
-
-    messages = list(state.get("messages", []))
-    accumulated_text = ""
-    model_used = getattr(llm, "model_name", None) or getattr(llm, "model", "ai-model")
-
-    # Check for stream callback in config
-    callbacks = config.get("callbacks") if isinstance(config, dict) else None
-    handlers = getattr(callbacks, "handlers", callbacks) if callbacks else []
-    stream_handler = None
-    if isinstance(handlers, (list, tuple)):
-        for cb in handlers:
-            if hasattr(cb, "on_chunk"):
-                stream_handler = cb
-                break
-
-    tool_iteration = state.get("tool_iteration", 0)
-
-    try:
-        # If the LLM supports streaming, stream chunks
-        if hasattr(llm, "astream"):
-            async for chunk in llm.astream(messages):
-                raw_chunk = getattr(chunk, "content", chunk)
-                content = extract_text_content(raw_chunk)
-                if content:
-                    accumulated_text += content
-                    if stream_handler and hasattr(stream_handler, "on_chunk"):
-                        await stream_handler.on_chunk(content)
-        else:
-            resp = await llm.ainvoke(messages)
-            raw_resp = getattr(resp, "content", resp)
-            accumulated_text = extract_text_content(raw_resp)
-            if stream_handler and hasattr(stream_handler, "on_chunk"):
-                await stream_handler.on_chunk(accumulated_text)
-
-        ai_msg = AIMessage(content=accumulated_text)
-        return {
-            "messages": [ai_msg],
-            "accumulated_text": accumulated_text,
-            "is_done": True,
-            "model_used": str(model_used),
-            "tool_iteration": tool_iteration + 1,
-            "error": None,
-        }
-    except Exception as exc:
-        logger.error("llm_node failed: %s", exc, exc_info=True)
-        fallback_msg = f"I apologize, but I encountered an issue processing that: {str(exc)}"
-        if stream_handler and hasattr(stream_handler, "on_chunk"):
-            await stream_handler.on_chunk(fallback_msg)
-        return {
-            "messages": [AIMessage(content=fallback_msg)],
-            "accumulated_text": fallback_msg,
-            "is_done": True,
-            "model_used": "error_handler",
-            "error": str(exc),
-        }
-
-
-async def execute_tools_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
-    """Executes any pending tool calls produced by the LLM."""
-    messages = state.get("messages", [])
-    last_msg = messages[-1] if messages else None
-    tool_results: List[Dict[str, Any]] = list(state.get("tool_results", []))
-    new_messages: List[BaseMessage] = []
-
-    if not last_msg or not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
-        return {"tool_results": tool_results}
-
-    callbacks = config.get("callbacks") if isinstance(config, dict) else None
-    handlers = getattr(callbacks, "handlers", callbacks) if callbacks else []
-    tool_start_cb = None
-    tool_end_cb = None
-    if isinstance(handlers, (list, tuple)):
-        for cb in handlers:
-            if hasattr(cb, "on_tool_start"):
-                tool_start_cb = cb.on_tool_start
-            if hasattr(cb, "on_tool_end"):
-                tool_end_cb = cb.on_tool_end
-
-    for tc in last_msg.tool_calls:
-        name = tc.get("name")
-        args = tc.get("args", {})
-        tc_id = tc.get("id", f"call_{name}")
-
-        if tool_start_cb:
-            await tool_start_cb(name, args)
-
-        tool_def = TOOL_REGISTRY.get(name)
-        if not tool_def:
-            res_dict = {"success": False, "error": f"Tool '{name}' not found."}
-        else:
-            try:
-                res_dict = await tool_def["func"](**args)
-            except Exception as e:
-                res_dict = {"success": False, "error": str(e)}
-
-        if tool_end_cb:
-            await tool_end_cb(name, res_dict)
-
-        tool_results.append({"name": name, "parameters": args, "result": res_dict})
-        content_str = res_dict.get("message") or str(res_dict.get("data") or res_dict)
-        new_messages.append(ToolMessage(content=content_str, tool_call_id=tc_id))
-
+def _as_bindable(tool_def: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "tool_results": tool_results,
-        "messages": new_messages,
+        "type": "function",
+        "function": {
+            "name": tool_def["name"],
+            "description": tool_def.get("description", ""),
+            "parameters": tool_def.get("parameters") or {"type": "object", "properties": {}},
+        },
     }
 
 
+def _compose_messages(state: AgentState) -> List[BaseMessage]:
+    """Fold pre-fetched context into the leading system prompt."""
+    messages = list(state.get("messages", []))
+    blocks = [b for b in state.get("context_blocks", []) if b]
+    if not blocks:
+        return messages
+    extra = "\n\n".join(blocks)
+    if messages and isinstance(messages[0], SystemMessage):
+        base = extract_text_content(messages[0].content)
+        return [SystemMessage(content=f"{base}\n\n{extra}")] + messages[1:]
+    return [SystemMessage(content=extra)] + messages
+
+
+def _tool_payload(result: Any) -> Dict[str, Any]:
+    """Structured tool result: status + message (models loop on bare/empty results)."""
+    if not isinstance(result, dict):
+        return {"status": "ok", "message": str(result)[:4000]}
+    ok = result.get("success", True)
+    status = result.get("status") or ("ok" if ok else "error")
+    msg = result.get("message") or result.get("error") or result.get("data") or ""
+    if not isinstance(msg, str):
+        msg = json.dumps(msg, default=str)
+    return {"status": status, "message": msg[:4000], "retryable": False}
+
+
+async def run_tool(name: str, args: Dict[str, Any], timeout: float = TOOL_TIMEOUT_S) -> Dict[str, Any]:
+    tool_def = TOOL_REGISTRY.get(name)
+    if not tool_def:
+        return {"success": False, "status": "invalid_argument", "message": f"Tool '{name}' does not exist."}
+    try:
+        return await asyncio.wait_for(tool_def["func"](**(args or {})), timeout=timeout)
+    except asyncio.TimeoutError:
+        return {"success": False, "status": "timeout", "message": f"{name} took too long and was cancelled."}
+    except TypeError as exc:
+        return {"success": False, "status": "invalid_argument", "message": f"Bad arguments for {name}: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tool %s failed: %s", name, exc)
+        return {"success": False, "status": "error", "message": str(exc)[:300]}
+
+
+# ── nodes ────────────────────────────────────────────────────────────────
+
+async def route_tools_node(state: AgentState) -> Dict[str, Any]:
+    """Pick the tools relevant to this turn."""
+    cfg = state.get("config", {})
+    user_msg = _latest_user_text(list(state.get("messages", [])))
+    tools = select_relevant_tools(user_msg, provider_name=cfg.get("modelProvider", "auto"))
+    logger.debug("route_tools: %d tools for %r", len(tools), user_msg[:50])
+    return {"config": {**cfg, "available_tools": [t["name"] for t in tools]}}
+
+
+async def pre_fetch_node(state: AgentState) -> Dict[str, Any]:
+    """Run obvious lookups concurrently before the LLM so it can answer in one pass."""
+    cfg = state.get("config", {})
+    available = cfg.get("available_tools", [])
+    tool_results: List[Dict[str, Any]] = list(state.get("tool_results", []))
+    blocks: List[str] = list(state.get("context_blocks", []))
+    if not available:
+        return {"tool_results": tool_results, "context_blocks": blocks}
+
+    user_msg = _latest_user_text(list(state.get("messages", [])))
+    tasks = []
+
+    if "predict_weather" in available:
+        location = extract_location_from_query(user_msg)
+        if location:
+            async def fetch_weather(loc: str = location):
+                return ("weather", loc, await run_tool("predict_weather", {"location": loc}))
+            tasks.append(fetch_weather())
+
+    if "web_search" in available and (_SEARCH_PATTERN.search(user_msg) or cfg.get("deepThink")):
+        query = _SEARCH_PREFIX.sub("", user_msg).strip().rstrip("?.!")
+        query = query if len(query) > 1 else user_msg
+
+        async def fetch_web(q: str = query):
+            return ("web", q, await run_tool("web_search", {"query": q}))
+        tasks.append(fetch_web())
+
+    for kind, param, res in await asyncio.gather(*tasks):
+        if not isinstance(res, dict) or res.get("success") is False or not res.get("message"):
+            continue
+        if kind == "weather":
+            tool_results.append({"name": "predict_weather", "parameters": {"location": param}, "result": res})
+            blocks.append(f"[Live weather, fetched just now for {param}]\n{res['message']}\nUse it directly in your answer.")
+        else:
+            tool_results.append({"name": "web_search", "parameters": {"query": param}, "result": res})
+            blocks.append(
+                f"[Live web results, fetched just now for '{param}']\n{str(res['message'])[:4000]}\n"
+                "Answer from these facts; say so if they don't cover the question."
+            )
+
+    return {"tool_results": tool_results, "context_blocks": blocks}
+
+
+async def llm_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+    """Stream from the strongest healthy model, with this turn's tools bound."""
+    settings = get_settings()
+    cfg = state.get("config", {})
+    sink = _sink(config)
+    iteration = state.get("tool_iteration", 0)
+
+    tool_defs = [TOOL_REGISTRY[n] for n in cfg.get("available_tools", []) if n in TOOL_REGISTRY]
+    # On the last allowed iteration, withhold tools so the model must answer.
+    tools = [_as_bindable(t) for t in tool_defs] if iteration < MAX_TOOL_ITERATIONS else []
+
+    thinking = state.get("thinking_level") or settings.gemini_thinking_level
+    mgr = ProviderManager()
+    messages = _compose_messages(state)
+
+    full = None
+    model_used = state.get("model_used") or "auto"
+    text = ""
+    try:
+        async for chunk, model in mgr.astream(
+            messages,
+            tools=tools or None,
+            thinking_level=thinking,
+            provider_override=cfg.get("modelProvider"),
+        ):
+            model_used = model
+            full = chunk if full is None else full + chunk
+            piece = extract_text_content(getattr(chunk, "content", ""))
+            if piece:
+                text += piece
+                await _emit(sink, "on_chunk", piece)
+    except AllModelsFailedError as exc:
+        logger.error("llm_node: %s", exc)
+        await _emit(sink, "on_chunk", OVERLOADED_REPLY)
+        return {
+            "messages": [AIMessage(content=OVERLOADED_REPLY)],
+            "accumulated_text": state.get("accumulated_text", "") + OVERLOADED_REPLY,
+            "is_done": True,
+            "model_used": "unavailable",
+            "tool_iteration": iteration + 1,
+            "error": str(exc),
+        }
+    except Exception as exc:  # mid-stream failure: keep what we have
+        logger.error("llm_node stream failed: %s", exc, exc_info=True)
+        if not text:
+            await _emit(sink, "on_chunk", OVERLOADED_REPLY)
+            text = OVERLOADED_REPLY
+        return {
+            "messages": [AIMessage(content=text)],
+            "accumulated_text": state.get("accumulated_text", "") + text,
+            "is_done": True,
+            "model_used": str(model_used),
+            "tool_iteration": iteration + 1,
+            "error": str(exc),
+        }
+
+    # Keep the aggregated chunk (not a fresh AIMessage) so Gemini 3 thought
+    # signatures on function calls survive into the next model call.
+    ai_msg = message_chunk_to_message(full) if full is not None else AIMessage(content="")
+    has_tool_calls = bool(getattr(ai_msg, "tool_calls", None))
+    accumulated = state.get("accumulated_text", "")
+    if text:
+        accumulated = f"{accumulated} {text}".strip() if accumulated else text
+
+    return {
+        "messages": [ai_msg],
+        "accumulated_text": accumulated,
+        "is_done": not has_tool_calls,
+        "model_used": str(model_used),
+        "tool_iteration": iteration + 1,
+        "error": None,
+    }
+
+
+async def execute_tools_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+    """Run the tool calls from the last AI message concurrently."""
+    messages = state.get("messages", [])
+    last = messages[-1] if messages else None
+    tool_results: List[Dict[str, Any]] = list(state.get("tool_results", []))
+    calls = list(getattr(last, "tool_calls", None) or [])
+    if not calls:
+        return {"tool_results": tool_results}
+
+    sink = _sink(config)
+
+    async def one(tc: Dict[str, Any]):
+        name = tc.get("name", "")
+        args = tc.get("args", {}) or {}
+        await _emit(sink, "on_tool_start", name, args)
+        res = await run_tool(name, args)
+        await _emit(sink, "on_tool_end", name, res)
+        payload = _tool_payload(res)
+        msg = ToolMessage(content=json.dumps(payload), tool_call_id=tc.get("id") or f"call_{name}", name=name)
+        return {"name": name, "parameters": args, "result": res}, msg
+
+    done = await asyncio.gather(*(one(tc) for tc in calls))
+    new_messages: List[BaseMessage] = []
+    for record, msg in done:
+        tool_results.append(record)
+        new_messages.append(msg)
+    return {"tool_results": tool_results, "messages": new_messages}
+
+
 def should_continue(state: AgentState) -> str:
-    """Decides if the graph should execute tools or terminate."""
     messages = state.get("messages", [])
     if not messages:
         return "end"
-
-    last_msg = messages[-1]
-    has_tool_calls = bool(hasattr(last_msg, "tool_calls") and last_msg.tool_calls)
-    iteration = state.get("tool_iteration", 0)
-
-    if has_tool_calls and iteration < 3:
+    last = messages[-1]
+    if getattr(last, "tool_calls", None) and state.get("tool_iteration", 0) <= MAX_TOOL_ITERATIONS:
         return "execute_tools"
     return "end"
-

@@ -22,7 +22,8 @@ import {
   ArchiveRestore,
   Lightbulb,
   Shirt,
-  BookOpen
+  BookOpen,
+  X
 } from 'lucide-react';
 
 interface SessionChatPanelProps {
@@ -69,6 +70,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
   const handleSend = () => {
     const trimmed = inputVal.trim();
     if (!trimmed) return;
+    voiceManager.getEngine().scheduler.ensureContext().catch(() => {});
     setInputVal('');
     auraController.ask(trimmed);
   };
@@ -433,6 +435,16 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             placeholder={isBusy ? "Thinking..." : "Message Aura…"}
             className="flex-1 bg-transparent border-none outline-none text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86]"
           />
+          {inputVal && (
+            <button
+              type="button"
+              onClick={() => setInputVal('')}
+              className="text-[#7A7D86] hover:text-[#FFFFFF] p-1 rounded-full transition cursor-pointer"
+              title="Clear"
+            >
+              <X size={13} />
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSend}

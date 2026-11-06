@@ -1,17 +1,24 @@
 """Configuration management using Pydantic Settings."""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, List, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_BACKEND_DIR = Path(__file__).resolve().parent
+
+# `npm run dev` starts uvicorn from the repo root while start-python-backend.bat starts
+# it inside python_backend/, so a bare ".env" meant different files depending on how the
+# app was launched. Read both; python_backend/.env wins on conflicts.
+_ENV_FILES = (str(_BACKEND_DIR.parent / ".env"), str(_BACKEND_DIR / ".env"))
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -36,10 +43,35 @@ class Settings(BaseSettings):
     # AI Provider
     model_provider: str = "auto"
 
-    # Gemini
+    # ── Gemini Live (real-time voice brain) ──────────────────────────────
+    # "native_gemini_live": Gemini's own expressive voice streams straight to the
+    #   avatar (lowest latency, real emotional prosody, true barge-in).
+    # "custom_voice_pack": Gemini Live thinks, ElevenLabs voice speaks the transcript.
+    voice_mode: str = "native_gemini_live"
+    # gemini-3.8-live supports BLOCKING tools + interleaved reasoning (recommended).
+    # gemini-3.8-live-extended-thinking only supports NON_BLOCKING tools.
+    gemini_live_model: str = "gemini-3.8-live"
+    gemini_live_thinking_level: str = "low"  # only applied to *-extended-thinking
+    gemini_live_voice: str = "Aoede"
+    # Server-side voice activity detection — tuned for snappy, human turn-taking.
+    live_vad_start_sensitivity: str = "high"   # high = barge-in triggers quickly
+    live_vad_end_sensitivity: str = "high"     # high = turn ends promptly after the user stops
+    live_vad_prefix_padding_ms: int = 100      # speech needed before start-of-speech commits
+    live_vad_silence_ms: int = 600             # silence that ends the user's turn
+    live_tool_timeout_s: float = 12.0
+    live_history_turns: int = 12               # recent turns seeded into a fresh live session
+
+    # ── Gemini text models (LangGraph path + deep_think tool) ────────────
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "models/gemini-3.5-flash-lite"
-    gemini_fallback_model: str = "models/gemini-3.5-flash-lite"
+    gemini_model: str = "gemini-3.8-flash"
+    # Comma-separated failover chain tried in order when the primary is overloaded.
+    gemini_fallback_models: str = "gemini-3.7-flash,gemini-3-flash-preview,gemini-3.5-flash-lite"
+    # Legacy single-fallback setting (still honoured, appended to the chain).
+    gemini_fallback_model: Optional[str] = None
+    gemini_thinking_level: str = "low"          # conversational turns
+    gemini_deep_thinking_level: str = "high"    # deep_think tool / complex questions
+    llm_first_token_timeout_s: float = 6.0      # fail over if no token by then
+    llm_model_cooldown_s: float = 90.0          # skip an overloaded model for this long
 
     # Grok / xAI
     grok_api_key: Optional[str] = None
@@ -76,6 +108,21 @@ class Settings(BaseSettings):
     def has_grok(self) -> bool:
         key = self.effective_grok_key
         return bool(key and key != "your_grok_api_key_here" and key != "your_xai_api_key_here")
+
+    @property
+    def gemini_model_chain(self) -> List[str]:
+        """Ordered, de-duplicated list of Gemini text models to try."""
+        raw = [self.gemini_model] + self.gemini_fallback_models.split(",")
+        if self.gemini_fallback_model:
+            raw.append(self.gemini_fallback_model)
+        chain: List[str] = []
+        for name in raw:
+            name = (name or "").strip()
+            if name.startswith("models/"):
+                name = name[len("models/"):]
+            if name and name not in chain:
+                chain.append(name)
+        return chain
 
 
 @lru_cache(maxsize=1)

@@ -12,6 +12,7 @@ export type AuraConversationState =
   | 'listening'
   | 'thinking'
   | 'speaking'
+  | 'interrupted'
   | 'idle_active'
   | 'stopping';
 
@@ -191,6 +192,18 @@ export interface AppState {
   // Aura Conversation State
   auraState: AuraConversationState;
   setAuraState: (state: AuraConversationState) => void;
+  voiceMode: 'custom_voice_pack' | 'native_gemini_live';
+  setVoiceMode: (mode: 'custom_voice_pack' | 'native_gemini_live') => void;
+  liveVoice: string;
+  setLiveVoice: (voice: string) => void;
+  isGeminiLiveConnected: boolean;
+  setIsGeminiLiveConnected: (connected: boolean) => void;
+  /** True while the user is audibly talking (drives active-listening nods). */
+  isUserSpeaking: boolean;
+  setIsUserSpeaking: (speaking: boolean) => void;
+  /** Live captions of what the user is saying right now. */
+  liveUserCaption: string;
+  setLiveUserCaption: (text: string) => void;
 
   // Error
   error: string | null;

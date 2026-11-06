@@ -1,7 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
-import { Plus, ArrowRight, Mic, Square } from 'lucide-react';
+import { Plus, ArrowRight, Mic, Square, X } from 'lucide-react';
 import { auraController } from '@/services/auraConversationController';
+import { voiceManager } from '@/services/voiceManager';
+import { nativeLiveAudioPlayer } from '@/services/nativeLiveAudioPlayer';
 import { isComplexReasoning } from '@/utils/reasoningDetector';
 
 /**
@@ -26,16 +28,33 @@ export default function ConversationBar() {
     agentSpeed,
     setAgentSpeed,
     setAgentModelName,
-    isAlwaysOnMic
+    isAlwaysOnMic,
+    liveUserCaption,
+    isUserSpeaking
   } = useAppStore();
+  const inLiveCall = isListening && auraController.isLiveConversation();
 
   const isBusy = agentStatus === 'thinking' || agentStatus === 'planning' || playbackState === 'loading';
   const isCharacterSpeaking = isSpeaking || playbackState === 'playing' || agentStatus === 'speaking';
 
+  // Browser-recognition fallback: mirror the transcript into the input so a tap submits it.
+  // (In a live call the audio is already with Aura — captions go in the placeholder instead.)
+  useEffect(() => {
+    if (isListening && scriptText && !auraController.isLiveConversation()) {
+      setInputText(scriptText);
+    }
+  }, [isListening, scriptText]);
+
+  const handleClear = () => {
+    setInputText('');
+    setScriptText('');
+    auraController.clearTranscript();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend(inputText || (isListening ? scriptText : ''));
+      handleSend(inputText);
     }
   };
 
@@ -44,8 +63,13 @@ export default function ConversationBar() {
     const trimmed = raw.trim();
     if (!trimmed) return;
 
+    // Pre-warm audio contexts on user interaction
+    voiceManager.getEngine().scheduler.ensureContext().catch(() => {});
+    nativeLiveAudioPlayer.ensureContext().catch(() => {});
+
     setInputText('');
     setScriptText('');
+    auraController.clearTranscript();
 
     // Always maintain Deep Think mode for highest quality intelligence
     setAgentModelName('Deep Think');
@@ -55,6 +79,10 @@ export default function ConversationBar() {
   };
 
   const handleToggleMic = () => {
+    // Pre-warm audio contexts on user interaction
+    voiceManager.getEngine().scheduler.ensureContext().catch(() => {});
+    nativeLiveAudioPlayer.ensureContext().catch(() => {});
+
     if (isCharacterSpeaking) {
       auraController.stopConversation();
     } else {
@@ -75,7 +103,15 @@ export default function ConversationBar() {
     e.target.value = '';
   };
 
-  const placeholder = isListening
+  const placeholder = inLiveCall
+    ? (liveUserCaption
+        ? liveUserCaption
+        : isCharacterSpeaking
+        ? "Aura is talking — just speak to interrupt"
+        : isUserSpeaking
+        ? "Listening…"
+        : "Live — talk to Aura anytime")
+    : isListening
     ? (scriptText ? scriptText : "Listening to your voice...")
     : isBusy
     ? "Thinking & analyzing..."
@@ -114,8 +150,15 @@ export default function ConversationBar() {
         {/* Center: Clean Text Input with Placeholder "Message Aura…" */}
         <input
           type="text"
-          value={inputText || (isListening ? scriptText : '')}
-          onChange={(e) => setInputText(e.target.value)}
+          value={inputText}
+          onChange={(e) => {
+            const val = e.target.value;
+            setInputText(val);
+            if (!val) {
+              setScriptText('');
+              auraController.clearTranscript();
+            }
+          }}
           onKeyDown={handleKeyDown}
           disabled={isBusy}
           placeholder={placeholder}
@@ -123,19 +166,32 @@ export default function ConversationBar() {
           style={{ outline: 'none', border: 'none', boxShadow: 'none', background: 'transparent' }}
         />
 
+        {/* Clear text button if input has text */}
+        {inputText && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="w-6 h-6 rounded-full flex items-center justify-center text-[#7A7D86] hover:text-[#FFFFFF] hover:bg-[#262A38] transition active:scale-90 cursor-pointer shrink-0"
+            title="Clear text"
+          >
+            <X size={14} strokeWidth={2} />
+          </button>
+        )}
+
         {/* Right Controls: Mic (36x36 #262A38) + Send (40x40 #8B7CFF with →) */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Mic / Stop Action Button */}
-          {isCharacterSpeaking ? (
+          {/* Stop: interrupts Aura (keeps a live call open) */}
+          {isCharacterSpeaking && (
             <button
               type="button"
-              onClick={() => auraController.stopConversation()}
+              onClick={() => (inLiveCall ? auraController.interrupt() : auraController.stopConversation())}
               className="w-9 h-9 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 flex items-center justify-center transition active:scale-95 shrink-0 border border-rose-500/30 cursor-pointer"
-              title="Stop speaking"
+              title={inLiveCall ? 'Interrupt Aura (or just start talking)' : 'Stop speaking'}
             >
               <Square size={12} strokeWidth={2.5} fill="currentColor" />
             </button>
-          ) : (
+          )}
+          {(!isCharacterSpeaking || inLiveCall) && (
             <button
               type="button"
               onClick={handleToggleMic}
@@ -147,7 +203,9 @@ export default function ConversationBar() {
                   : 'bg-[#262A38] text-[#FFFFFF] hover:bg-[#32374A]'
               }`}
               title={
-                isListening
+                inLiveCall
+                  ? 'Live conversation — tap to end'
+                  : isListening
                   ? 'Listening — tap to stop'
                   : isAlwaysOnMic
                   ? 'Always-on mic active — tap to mute'
@@ -155,7 +213,7 @@ export default function ConversationBar() {
               }
             >
               <Mic size={16} strokeWidth={2} />
-              {isListening && (
+              {isListening && (isUserSpeaking || !inLiveCall) && (
                 <span className="absolute inset-0 rounded-full border border-[#8B7CFF] animate-ping opacity-60" />
               )}
             </button>
@@ -164,8 +222,8 @@ export default function ConversationBar() {
           {/* Send Action (Figma: Ellipse 40x40 #8B7CFF, text →) */}
           <button
             type="button"
-            onClick={() => handleSend(inputText || scriptText)}
-            disabled={!inputText.trim() && !(isListening && scriptText.trim())}
+            onClick={() => handleSend(inputText)}
+            disabled={!inputText.trim()}
             className="w-10 h-10 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center shadow-[0_2px_12px_rgba(139,124,255,0.4)] text-[#FFFFFF] font-bold shrink-0 cursor-pointer"
             title="Send message"
           >

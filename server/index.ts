@@ -381,9 +381,9 @@ app.post('/api/elevenlabs', async (req, res) => {
   }
 
   try {
-    const selectedModel = modelId || 'eleven_multilingual_v2';
+    const selectedModel = modelId || 'eleven_turbo_v2_5';
     const response = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps?optimize_streaming_latency=4`,
       {
         text,
         model_id: selectedModel

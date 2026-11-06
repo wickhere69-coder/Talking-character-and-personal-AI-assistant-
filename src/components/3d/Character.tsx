@@ -6,6 +6,7 @@ import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { LipSyncController } from '@/engine/LipSyncController';
 import { ProceduralAnimation, CharacterBones } from '@/engine/ProceduralAnimation';
 import { useAppStore } from '@/store/appStore';
+import { nativeLiveAudioPlayer } from '@/services/nativeLiveAudioPlayer';
 
 const AVATAR_URL = '/models/avatar.glb';
 
@@ -127,6 +128,9 @@ export default function Character({ url }: { url?: string }) {
   }, [visemeQueue]);
 
   useEffect(() => {
+    // Native Gemini voice drives the mouth from the live spectrum; captions update
+    // many times per second there, so don't rebuild a phoneme timeline each time.
+    if (nativeLiveAudioPlayer.getIsPlaying()) return;
     if (lipSyncController.current && speechText && isSpeaking) {
       lipSyncController.current.startSpeechTimeline(speechText, activeRate);
     } else if (!isSpeaking && lipSyncController.current) {
@@ -150,15 +154,22 @@ export default function Character({ url }: { url?: string }) {
   }, [activeCharIndex, isSpeaking]);
 
   useFrame((state, delta) => {
-    const { isSpeaking, playbackState, agentStatus, currentEmotion } = useAppStore.getState();
+    const { isSpeaking, playbackState, agentStatus, currentEmotion, isUserSpeaking } = useAppStore.getState();
     const speaking = isSpeaking || playbackState === 'playing';
 
     if (lipSyncController.current) {
       lipSyncController.current.update(delta, 0, speaking);
     }
-    
+
     if (proceduralAnimation.current) {
-      proceduralAnimation.current.update(delta, speaking, agentStatus, currentEmotion?.primary || 'neutral');
+      proceduralAnimation.current.update(
+        delta,
+        speaking,
+        agentStatus,
+        currentEmotion?.primary || 'neutral',
+        currentEmotion?.intensity ?? 0.5,
+        !!isUserSpeaking,
+      );
     }
   });
 

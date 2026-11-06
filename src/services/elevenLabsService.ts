@@ -137,7 +137,7 @@ export async function synthesizeWithElevenLabs(
   text: string, 
   voiceId: string, 
   apiKey?: string, 
-  modelId: string = 'eleven_multilingual_v2',
+  modelId: string = 'eleven_turbo_v2_5',
   signal?: AbortSignal
 ): Promise<SynthesisResult> {
   const key = apiKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');

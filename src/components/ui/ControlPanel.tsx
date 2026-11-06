@@ -89,7 +89,10 @@ export default function ControlPanel() {
     isControlPanelCollapsed,
     setIsControlPanelCollapsed,
     isAlwaysOnMic,
-    setIsAlwaysOnMic
+    setIsAlwaysOnMic,
+    voiceMode, setVoiceMode,
+    liveVoice, setLiveVoice,
+    isGeminiLiveConnected
   } = useAppStore();
 
   // Drawer open state synced with store
@@ -764,6 +767,52 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           {/* ══════════════════════════════════════════════════════════════ */}
           {activeTab === 'voice' && (
             <div className="space-y-5">
+              {/* Conversation voice engine */}
+              <div className="p-3.5 rounded-[16px] bg-[#1A1D27] border border-[#23252F] space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-[#F2F2F2] font-sans">Conversation voice</h3>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono border ${isGeminiLiveConnected ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25' : 'bg-[#262A38] text-[#7A7D86] border-[#2A2E3B]'}`}>
+                    {isGeminiLiveConnected ? 'Gemini Live connected' : 'Live offline'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    ['native_gemini_live', 'Gemini Live', 'Most natural · instant · real emotion'],
+                    ['custom_voice_pack', 'Voice pack', 'ElevenLabs voices below'],
+                  ] as const).map(([mode, label, hint]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setVoiceMode(mode)}
+                      className={`text-left p-2.5 rounded-[12px] border transition cursor-pointer ${voiceMode === mode ? 'bg-[#8B7CFF]/15 border-[#8B7CFF]/50' : 'bg-[#13151D] border-[#23252F] hover:border-[#8B7CFF]/30'}`}
+                    >
+                      <div className="text-xs font-semibold text-[#F2F2F2]">{label}</div>
+                      <div className="text-[10px] text-[#7A7D86] mt-0.5">{hint}</div>
+                    </button>
+                  ))}
+                </div>
+                {voiceMode === 'native_gemini_live' && (
+                  <label className="flex items-center justify-between gap-3 text-[11px] text-[#A0A3AD]">
+                    <span>Gemini voice</span>
+                    <select
+                      value={liveVoice}
+                      onChange={(e) => setLiveVoice(e.target.value)}
+                      className="bg-[#13151D] border border-[#23252F] rounded-full px-3 py-1.5 text-xs text-[#F2F2F2] focus:outline-none focus:border-[#8B7CFF]/60 cursor-pointer"
+                    >
+                      {[
+                        ['Aoede', 'Breezy'], ['Sulafat', 'Warm'], ['Leda', 'Youthful'], ['Achernar', 'Soft'],
+                        ['Vindemiatrix', 'Gentle'], ['Despina', 'Smooth'], ['Callirrhoe', 'Easy-going'], ['Autonoe', 'Bright'],
+                        ['Laomedeia', 'Upbeat'], ['Kore', 'Firm'], ['Achird', 'Friendly'], ['Sadachbia', 'Lively'],
+                        ['Puck', 'Upbeat'], ['Zephyr', 'Bright'], ['Charon', 'Informative'], ['Fenrir', 'Excitable'],
+                        ['Orus', 'Firm'], ['Gacrux', 'Mature'], ['Zubenelgenubi', 'Casual'], ['Iapetus', 'Clear'],
+                      ].map(([name, style]) => (
+                        <option key={name} value={name}>{name} — {style}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+
               {/* ElevenLabs Voice Pack Banner */}
               <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-[#1A1D27] border border-[#23252F]">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -792,8 +841,18 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                   value={voiceSearchQuery}
                   onChange={(e) => setVoiceSearchQuery(e.target.value)}
                   placeholder="Search voices by name or language..."
-                  className="w-full w-full bg-[#1A1D27] border border-[#23252F] focus:border-[#8B7CFF]/60 focus:ring-1 focus:ring-[#8B7CFF]/25 rounded-full pl-10 pr-4 py-2 text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86] focus:outline-none transition font-sans"
+                  className="w-full bg-[#1A1D27] border border-[#23252F] focus:border-[#8B7CFF]/60 focus:ring-1 focus:ring-[#8B7CFF]/25 rounded-full pl-10 pr-9 py-2 text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86] focus:outline-none transition font-sans"
                 />
+                {voiceSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setVoiceSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7A7D86] hover:text-[#FFFFFF] p-1 rounded-full transition cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
 
               {/* Voice Catalog List with Gaps */}

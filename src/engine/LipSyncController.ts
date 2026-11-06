@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { detectMorphTargetType, getVisemeWeights, OCULUS_VISEME_TO_ARKIT, AZURE_VISEME_TO_OCULUS } from './visemeMappings';
 import { VisemeFrame } from '@/types';
 import { SpeechVisemeCue, buildSpeechVisemeTimeline } from './phonemizer';
+import { getConvoLatencyEngine } from '@/lib/convo-latency-core';
+import { nativeLiveAudioPlayer } from '@/services/nativeLiveAudioPlayer';
 
 export class LipSyncController {
   private meshes: THREE.SkinnedMesh[];
@@ -177,12 +179,17 @@ export class LipSyncController {
     this.speechStarted = true;
 
     // 1. Determine raw playback time from interpolated continuous audio clock
+    const convoEngine = getConvoLatencyEngine();
+    const isWebAudioPlaying = convoEngine.scheduler.isPlaying();
     const interpolatedTime = this.getInterpolatedAudioTimeMs();
     let rawTimeMs: number;
 
     if (this.isAudioTracking) {
       rawTimeMs = interpolatedTime;
       this.speechClockMs = rawTimeMs;
+    } else if (isWebAudioPlaying) {
+      this.speechClockMs += delta * 1000;
+      rawTimeMs = this.speechClockMs;
     } else if (interpolatedTime > 0) {
       rawTimeMs = interpolatedTime;
       this.speechClockMs = rawTimeMs;
@@ -215,7 +222,10 @@ export class LipSyncController {
 
     let targetWeights: Record<string, number> = {};
 
-    if (this.visemeQueue.length > 0) {
+    if (nativeLiveAudioPlayer.getIsPlaying()) {
+      // Native Gemini Live voice: drive visemes from the live spectrum (formant bands)
+      targetWeights = this.liveFormantVisemes(delta);
+    } else if (this.visemeQueue.length > 0) {
       // High-precision ElevenLabs timestamps
       targetWeights = this.interpolateVisemes(timeMs);
     } else if (this.speechCues.length > 0) {
@@ -241,6 +251,59 @@ export class LipSyncController {
     }
 
     this.applyWeightsToMeshes();
+  }
+
+  private prevLiveAmp = 0;
+  private closurePulse = 0;
+
+  /**
+   * Real-time viseme estimate from the voice actually playing:
+   *  - loudness gates the mouth (silence → closed lips)
+   *  - F1 band (low) dominance → open vowels (aa / O)
+   *  - F2 band (mid) dominance → spread vowels (E / I)
+   *  - high band → fricatives (S / F)
+   *  - a sharp loudness drop mid-speech → brief lip closure (p / b / m)
+   */
+  private liveFormantVisemes(delta: number): Record<string, number> {
+    const { amp, low, mid, high } = nativeLiveAudioPlayer.getVisemeFeatures();
+    const ss = THREE.MathUtils.smoothstep;
+    const gate = THREE.MathUtils.clamp((amp - 0.05) / 0.45, 0, 1);
+    const total = low + mid + high + 1e-4;
+    const lowR = low / total;
+    const midR = mid / total;
+    const highR = high / total;
+
+    if (this.prevLiveAmp > 0.3 && amp < this.prevLiveAmp * 0.45) this.closurePulse = 1;
+    this.closurePulse = Math.max(0, this.closurePulse - delta * 14);
+    this.prevLiveAmp = this.prevLiveAmp * 0.6 + amp * 0.4;
+
+    const open = gate * THREE.MathUtils.clamp(0.3 + lowR * 0.9, 0, 1);
+    const oculus: Record<string, number> = {
+      viseme_aa: open * ss(lowR, 0.42, 0.68),
+      viseme_O: open * THREE.MathUtils.clamp((lowR - midR) * 1.4, 0, 1) * (1 - highR) * 0.7,
+      viseme_E: open * ss(midR, 0.26, 0.46),
+      viseme_I: gate * ss(midR, 0.38, 0.56) * (1 - lowR) * 0.8,
+      viseme_SS: gate * ss(highR, 0.22, 0.42) * 0.7,
+      viseme_PP: this.closurePulse * 0.8,
+    };
+    // Lip closure suppresses the open shapes for that instant.
+    const closeK = 1 - this.closurePulse * 0.8;
+    for (const k of ['viseme_aa', 'viseme_O', 'viseme_E', 'viseme_I']) oculus[k] *= closeK;
+
+    const humanScale = 0.6;
+    const weights: Record<string, number> = {};
+    if (this.morphTargetType === 'oculus') {
+      for (const k in oculus) weights[k] = Math.min(0.58, oculus[k] * humanScale);
+    } else {
+      for (const k in oculus) {
+        const map = OCULUS_VISEME_TO_ARKIT[k] || {};
+        for (const shape in map) {
+          weights[shape] = Math.min(0.58, (weights[shape] || 0) + map[shape] * oculus[k] * humanScale);
+        }
+      }
+      weights['jawOpen'] = Math.max(weights['jawOpen'] || 0, open * 0.42 * closeK);
+    }
+    return weights;
   }
 
   private sampleSpeechTimeline(timeMs: number): Record<string, number> {
@@ -325,7 +388,7 @@ export class LipSyncController {
   private applyWeightsToMeshes(): void {
     for (const mesh of this.meshes) {
       if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) continue;
-      
+
       for (const shape in this.currentWeights) {
         const index = mesh.morphTargetDictionary[shape];
         if (index !== undefined) {
@@ -342,11 +405,11 @@ export class LipSyncController {
 
   private interpolateVisemes(timeMs: number): Record<string, number> {
     if (this.visemeQueue.length === 0) return {};
-    
+
     let low = 0;
     let high = this.visemeQueue.length - 1;
     let idx = 0;
-    
+
     while (low <= high) {
       const mid = Math.floor((low + high) / 2);
       if (this.visemeQueue[mid].audioOffset <= timeMs) {
@@ -373,7 +436,7 @@ export class LipSyncController {
     };
 
     const wCurrent = getWeights(currentFrame.visemeId);
-    
+
     if (nextFrame && nextFrame.audioOffset > currentFrame.audioOffset) {
       const t = (timeMs - currentFrame.audioOffset) / (nextFrame.audioOffset - currentFrame.audioOffset);
       const clampedT = Math.max(0, Math.min(1, t));

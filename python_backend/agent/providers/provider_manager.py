@@ -1,192 +1,266 @@
-"""Provider manager: returns LangChain chat models for Gemini and Grok with caching and resilient failover."""
+"""Model routing for the LangGraph text brain.
+
+Gemini's text endpoints regularly return 503 "high demand" for the newest models.
+LangChain's default of six silent retries turned that into 60+ second stalls, so the
+router instead:
+  * tries an ordered chain (strongest first: gemini-3.8-flash → 3.7-flash → 3.5-flash-lite → Grok),
+  * gives each model a first-token deadline and fails over the moment it's missed,
+  * opens a circuit breaker on an overloaded model so later turns skip it instantly.
+"""
 from __future__ import annotations
 
+import asyncio
 import os
-from typing import Any, Dict, Optional
+import time
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Module-level model instance caches for zero-overhead turn initialization
-_CACHED_MODELS: Dict[str, Any] = {}
+# Built chat models are cached by (provider, model, thinking level).
+_CACHED_MODELS: Dict[Tuple[str, str, str], Any] = {}
+# model name -> monotonic time until which it is skipped
+_COOLDOWN_UNTIL: Dict[str, float] = {}
+# models that rejected thinking_level (400) — rebuilt without it
+_NO_THINKING: set = set()
+
+_OVERLOAD_MARKERS = ("503", "429", "unavailable", "high demand", "overloaded", "resource_exhausted", "quota", "deadline", "timeout")
 
 
-class ResilientGeminiModel:
-    """Wraps ChatGoogleGenerativeAI with automatic fallback between fast models."""
+@dataclass(frozen=True)
+class ModelCandidate:
+    provider: str  # "gemini" | "grok"
+    model: str
 
-    def __init__(self, primary_llm: Any, fallback_llm: Any, model_name: str):
-        self._primary = primary_llm
-        self._fallback = fallback_llm
-        self.model_name = model_name
-        self.model = model_name
-        self._failed_over = False
 
-    async def astream(self, messages: Any, **kwargs: Any):
-        if self._failed_over and self._fallback:
-            async for chunk in self._fallback.astream(messages, **kwargs):
-                yield chunk
-            return
+class AllModelsFailedError(RuntimeError):
+    pass
 
-        try:
-            async for chunk in self._primary.astream(messages, **kwargs):
-                yield chunk
-        except Exception as e:
-            logger.warning("Primary Gemini model (%s) failed (%s), permanently locking to fallback for ultra-low latency...", self.model_name, e)
-            self._failed_over = True
-            if self._fallback:
-                async for chunk in self._fallback.astream(messages, **kwargs):
-                    yield chunk
-            else:
-                raise
 
-    async def ainvoke(self, messages: Any, **kwargs: Any):
-        if self._failed_over and self._fallback:
-            return await self._fallback.ainvoke(messages, **kwargs)
+_DEAD_MARKERS = ("incorrect api key", "api key not valid", "invalid api key", "401", "403", "permission", "404", "not found", "no longer available")
 
-        try:
-            return await self._primary.ainvoke(messages, **kwargs)
-        except Exception as e:
-            logger.warning("Primary Gemini model (%s) ainvoke failed (%s), permanently locking to fallback for ultra-low latency...", self.model_name, e)
-            self._failed_over = True
-            if self._fallback:
-                return await self._fallback.ainvoke(messages, **kwargs)
-            raise
 
-    def invoke(self, messages: Any, **kwargs: Any):
-        if self._failed_over and self._fallback:
-            return self._fallback.invoke(messages, **kwargs)
+def _is_overload(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return isinstance(exc, asyncio.TimeoutError) or any(m in text for m in _OVERLOAD_MARKERS)
 
-        try:
-            return self._primary.invoke(messages, **kwargs)
-        except Exception as e:
-            logger.warning("Primary Gemini model (%s) invoke failed (%s), permanently locking to fallback for ultra-low latency...", self.model_name, e)
-            self._failed_over = True
-            if self._fallback:
-                return self._fallback.invoke(messages, **kwargs)
-            raise
+
+def _cooldown_for(exc: BaseException, base: float) -> float:
+    """Auth/missing-model errors won't fix themselves soon; overloads usually clear in a minute or two."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    if any(m in text for m in _DEAD_MARKERS):
+        return 3600.0
+    return base if _is_overload(exc) else base / 3
+
+
+def _cooldown(model: str, seconds: float) -> None:
+    _COOLDOWN_UNTIL[model] = time.monotonic() + seconds
+
+
+def _is_cooling(model: str) -> bool:
+    return _COOLDOWN_UNTIL.get(model, 0.0) > time.monotonic()
 
 
 class ProviderManager:
-    """Manages LLM provider selection and instantiation."""
+    """Builds chat models and streams from the first healthy one."""
 
     def __init__(self, provider_override: Optional[str] = None):
         from config import get_settings
-        settings = get_settings()
-        self._settings = settings
-        self._default_provider = provider_override or settings.model_provider
 
-    def get_llm(self, provider_override: Optional[str] = None):
-        """Return a LangChain ChatModel for the selected provider.
-        Priority: provider_override → self._default_provider → auto-detect
-        """
+        self._settings = get_settings()
+        self._default_provider = (provider_override or self._settings.model_provider or "auto").lower()
+
+    # ── Candidate selection ──────────────────────────────────────────────
+    def candidates(self, provider_override: Optional[str] = None) -> List[ModelCandidate]:
         provider = (provider_override or self._default_provider or "auto").lower()
-
-        if provider in ("gemini", "auto", "langgraph"):
-            llm = self._try_gemini()
-            if llm is not None:
-                return llm
-            if provider == "gemini":
-                raise RuntimeError("Gemini provider requested but GEMINI_API_KEY is not configured.")
-            # auto: fall through to grok
-            llm = self._try_grok()
-            if llm is not None:
-                return llm
-            raise RuntimeError("No AI provider is configured. Set GEMINI_API_KEY in .env")
+        gemini = [ModelCandidate("gemini", m) for m in self._settings.gemini_model_chain] if self._settings.has_gemini else []
+        grok = [ModelCandidate("grok", self._settings.grok_model)] if self._settings.has_grok else []
 
         if provider in ("grok", "xai"):
-            llm = self._try_grok()
-            if llm is not None:
-                return llm
-            raise RuntimeError("Grok provider requested but GROK_API_KEY / XAI_API_KEY is not configured.")
+            ordered = grok + gemini
+        else:  # gemini | auto | langgraph | unknown
+            ordered = gemini + grok
+        if not ordered:
+            raise RuntimeError("No AI provider is configured. Set GEMINI_API_KEY (or GROK_API_KEY) in python_backend/.env")
 
-        # Unknown provider – try auto
-        logger.warning("Unknown provider '%s', falling back to auto", provider)
-        return self.get_llm("auto")
+        healthy = [c for c in ordered if not _is_cooling(c.model)]
+        # If everything is cooling down, still try them all rather than fail outright.
+        return healthy or ordered
 
-    def _try_gemini(self):
-        """Attempt to instantiate or retrieve a cached resilient Gemini chat model."""
-        cache_key = f"gemini_{self._settings.gemini_api_key}"
-        if cache_key in _CACHED_MODELS:
-            return _CACHED_MODELS[cache_key]
+    # ── Model construction ───────────────────────────────────────────────
+    def build(self, cand: ModelCandidate, thinking_level: Optional[str] = None) -> Any:
+        level = None if cand.model in _NO_THINKING else (thinking_level or None)
+        key = (cand.provider, cand.model, level or "")
+        if key in _CACHED_MODELS:
+            return _CACHED_MODELS[key]
 
-        try:
+        if cand.provider == "gemini":
             from langchain_google_genai import ChatGoogleGenerativeAI
 
-            api_key = self._settings.gemini_api_key
-            if not api_key or api_key == "your_gemini_api_key_here":
-                return None
-
-            primary_model = self._settings.gemini_model or "models/gemini-3-flash-preview"
-            fallback_model = getattr(self._settings, "gemini_fallback_model", "models/gemini-3.5-flash-lite")
-
-            primary_llm = ChatGoogleGenerativeAI(
-                model=primary_model,
-                google_api_key=api_key,
-                temperature=0.7,
+            kwargs: Dict[str, Any] = dict(
+                model=cand.model,
+                google_api_key=self._settings.gemini_api_key,
+                temperature=0.8,
                 streaming=True,
+                max_retries=0,  # we fail over instead of silently retrying
+                timeout=45,
             )
-
-            fallback_llm = None
-            if fallback_model != primary_model:
-                try:
-                    fallback_llm = ChatGoogleGenerativeAI(
-                        model=fallback_model,
-                        google_api_key=api_key,
-                        temperature=0.7,
-                        streaming=True,
-                    )
-                except Exception as fb_err:
-                    logger.debug("Could not initialize fallback model: %s", fb_err)
-
-            resilient = ResilientGeminiModel(primary_llm, fallback_llm, primary_model)
-            _CACHED_MODELS[cache_key] = resilient
-            logger.info("Resilient Gemini provider initialized: %s (fallback: %s)", primary_model, fallback_model)
-            return resilient
-        except Exception as e:
-            logger.warning("Could not initialise Gemini provider: %s", e)
-            return None
-
-    def _try_grok(self):
-        """Attempt to instantiate a Grok/xAI chat model via OpenAI-compatible API."""
-        cache_key = f"grok_{self._settings.effective_grok_key}"
-        if cache_key in _CACHED_MODELS:
-            return _CACHED_MODELS[cache_key]
-
-        try:
+            if level:
+                kwargs["thinking_level"] = level
+            llm = ChatGoogleGenerativeAI(**kwargs)
+        else:
             from langchain_openai import ChatOpenAI
 
-            api_key = self._settings.effective_grok_key
-            if not api_key or api_key in ("your_grok_api_key_here", "your_xai_api_key_here"):
-                return None
-
-            model_name = self._settings.grok_model
             llm = ChatOpenAI(
-                model=model_name,
-                api_key=api_key,
+                model=cand.model,
+                api_key=self._settings.effective_grok_key,
                 base_url="https://api.x.ai/v1",
-                temperature=0.7,
+                temperature=0.8,
                 streaming=True,
+                max_retries=0,
+                timeout=45,
             )
-            _CACHED_MODELS[cache_key] = llm
-            logger.debug("Grok provider initialised: %s", model_name)
-            return llm
-        except Exception as e:
-            logger.warning("Could not initialise Grok provider: %s", e)
-            return None
+        _CACHED_MODELS[key] = llm
+        logger.debug("Built chat model %s/%s (thinking=%s)", cand.provider, cand.model, level)
+        return llm
 
+    def get_llm(self, provider_override: Optional[str] = None, thinking_level: Optional[str] = None) -> Any:
+        """Back-compat: return the first healthy chat model (no failover)."""
+        cand = self.candidates(provider_override)[0]
+        return self.build(cand, thinking_level or self._settings.gemini_thinking_level)
+
+    # ── Streaming with hedged failover ───────────────────────────────────
+    async def _first_chunk(
+        self,
+        cand: ModelCandidate,
+        messages: Sequence[Any],
+        tools: Optional[List[Dict[str, Any]]],
+        thinking_level: Optional[str],
+        deadline: float,
+    ) -> Tuple[Any, Any, float]:
+        """Open a stream and wait for its first chunk. Returns (agen, first_chunk, started)."""
+        for attempt in range(2):  # 2nd attempt only to retry without thinking_level
+            llm = self.build(cand, thinking_level)
+            runnable = llm.bind_tools(tools) if tools else llm
+            agen = runnable.astream(list(messages)).__aiter__()
+            started = time.perf_counter()
+            try:
+                first = await asyncio.wait_for(agen.__anext__(), timeout=deadline)
+                return agen, first, started
+            except asyncio.CancelledError:
+                await _safe_aclose(agen)
+                raise
+            except Exception as exc:
+                await _safe_aclose(agen)
+                msg = str(exc).lower()
+                if attempt == 0 and thinking_level and "thinking" in msg and "support" in msg:
+                    logger.info("LLM %s rejected thinking_level=%s — retrying without it", cand.model, thinking_level)
+                    _NO_THINKING.add(cand.model)
+                    continue
+                raise
+        raise RuntimeError(f"{cand.model}: could not start stream")
+
+    async def astream(
+        self,
+        messages: Sequence[Any],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        thinking_level: Optional[str] = None,
+        provider_override: Optional[str] = None,
+        first_token_timeout: Optional[float] = None,
+        hedge_after: Optional[float] = None,
+    ) -> AsyncIterator[Tuple[Any, str]]:
+        """Yield (chunk, model_name) from the first model to produce a token.
+
+        Starts the strongest healthy model; if it errors, the next starts immediately, and if it
+        is merely slow (no token after ``hedge_after`` s) a backup is raced alongside it. The
+        first stream to emit wins; the loser is cancelled.
+        """
+        deadline = first_token_timeout or self._settings.llm_first_token_timeout_s
+        hedge = hedge_after if hedge_after is not None else min(2.0, deadline / 2)
+        cooldown = self._settings.llm_model_cooldown_s
+        cands = self.candidates(provider_override)
+        errors: List[str] = []
+        pending: Dict[asyncio.Task, ModelCandidate] = {}
+        next_idx = 0
+
+        def launch() -> None:
+            nonlocal next_idx
+            cand = cands[next_idx]
+            next_idx += 1
+            task = asyncio.create_task(self._first_chunk(cand, messages, tools, thinking_level, deadline))
+            pending[task] = cand
+
+        launch()
+        winner: Optional[Tuple[ModelCandidate, Any, Any, float]] = None
+        try:
+            while pending and winner is None:
+                can_hedge = next_idx < len(cands) and len(pending) < 2
+                done, _ = await asyncio.wait(
+                    set(pending), timeout=hedge if can_hedge else None, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not done:
+                    logger.info("LLM %s slow to first token — hedging with %s", pending[next(iter(pending))].model, cands[next_idx].model)
+                    launch()
+                    continue
+                for task in done:
+                    cand = pending.pop(task)
+                    exc = task.exception()
+                    if exc is None:
+                        if winner is None:
+                            agen, first, started = task.result()
+                            winner = (cand, agen, first, started)
+                        else:  # a second racer finished at the same moment — discard it
+                            await _safe_aclose(task.result()[0])
+                        continue
+                    secs = _cooldown_for(exc, cooldown)
+                    _cooldown(cand.model, secs)
+                    logger.warning("LLM %s failed before first token (%s) — cooling %.0fs", cand.model, str(exc)[:140], secs)
+                    errors.append(f"{cand.model}: {str(exc)[:120] or type(exc).__name__}")
+                    if winner is None and next_idx < len(cands) and len(pending) < 2:
+                        launch()
+        finally:
+            for task in list(pending):
+                task.cancel()
+            for task in list(pending):
+                try:
+                    res = await task
+                    await _safe_aclose(res[0])
+                except BaseException:
+                    pass
+
+        if winner is None:
+            raise AllModelsFailedError("All language models are unavailable right now: " + " | ".join(errors))
+
+        cand, agen, first, started = winner
+        logger.info("LLM %s first token in %.0f ms", cand.model, (time.perf_counter() - started) * 1000)
+        yield first, cand.model
+        async for chunk in agen:
+            yield chunk, cand.model
+
+    # ── Status ───────────────────────────────────────────────────────────
     def health_check(self) -> dict:
-        """Return health status of each provider."""
+        now = time.monotonic()
         return {
             "gemini": self._settings.has_gemini,
             "grok": self._settings.has_grok,
             "default_provider": self._default_provider,
+            "text_model_chain": self._settings.gemini_model_chain,
+            "live_model": self._settings.gemini_live_model,
+            "cooling_down": {m: round(t - now, 1) for m, t in _COOLDOWN_UNTIL.items() if t > now},
         }
 
     def key_status(self) -> dict:
-        """Return which API keys are configured."""
         return {
             "gemini": self._settings.has_gemini,
             "grok": self._settings.has_grok,
             "elevenlabs": bool(os.environ.get("ELEVENLABS_API_KEY")),
         }
+
+
+async def _safe_aclose(agen: Any) -> None:
+    try:
+        await agen.aclose()
+    except Exception:
+        pass

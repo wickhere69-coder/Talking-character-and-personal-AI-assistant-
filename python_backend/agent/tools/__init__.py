@@ -5,6 +5,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 
 from agent.tools.filesystem_tools import create_file, list_files, read_file, search_files
+from agent.tools.memory_tools import recall_about_user, remember_about_user
 from agent.tools.productivity_tools import (
     add_note,
     add_task,
@@ -193,9 +194,54 @@ TOOL_DEFINITIONS = [
         },
         "func": search_files,
     },
+    {
+        "name": "remember_about_user",
+        "description": (
+            "Save a durable personal fact the user shared (their name, people/pets in their life, "
+            "preferences, goals, plans, what they're working on). Overwrites the same topic."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Short label, e.g. 'name', 'sister', 'favorite food', 'current project'."},
+                "detail": {"type": "string", "description": "The fact itself, in a short phrase."},
+            },
+            "required": ["topic", "detail"],
+        },
+        "func": remember_about_user,
+    },
+    {
+        "name": "recall_about_user",
+        "description": "Look up what you remember about the user when it isn't already in your context.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to look up, e.g. 'birthday', 'job'."}
+            },
+        },
+        "func": recall_about_user,
+    },
 ]
 
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {t["name"]: t for t in TOOL_DEFINITIONS}
+
+# Tools offered to the real-time voice model. Fewer, clearer tools = faster, more
+# accurate tool choice; duplicates (get_weather) and URL-centric tools are omitted.
+LIVE_TOOL_NAMES = [
+    "predict_weather",
+    "web_search",
+    "add_task",
+    "list_tasks",
+    "complete_task",
+    "add_note",
+    "list_notes",
+    "delete_note",
+    "remember_about_user",
+    "recall_about_user",
+    "list_files",
+    "read_file",
+    "search_files",
+]
 
 
 def select_relevant_tools(user_message: str, provider_name: str = "auto") -> List[Dict[str, Any]]:
@@ -220,7 +266,12 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
     ]
     task_keywords = [
         "add task", "list tasks", "todo", "to-do", "complete task",
-        "add note", "list notes", "delete note"
+        "add note", "list notes", "delete note", "remind me", "note that", "my tasks", "my notes"
+    ]
+    memory_keywords = [
+        "remember", "my name", "call me", "i live", "my favorite", "my favourite", "my birthday",
+        "my wife", "my husband", "my partner", "my sister", "my brother", "my mom", "my dad",
+        "my friend", "my dog", "my cat", "i work", "i'm working", "do you know me", "about me",
     ]
     weather_keywords = [
         "weather", "wether", "forecast", "fore cast", "temperature", "temprature",
@@ -237,10 +288,17 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
 
     if any(kw in lower for kw in file_keywords):
         matched.update(["list_files", "read_file", "search_files", "create_file"])
-    if any(kw in lower for kw in task_keywords):
+    task_pattern = re.compile(
+        r"\b(?:add|create|make|set|put|save|write|jot|take|mark|finish|complete|delete|remove|show|list|read|what(?:'s| are| is))\b"
+        r".{0,40}\b(?:tasks?|todos?|to-dos?|reminders?|notes?|list)\b",
+        re.IGNORECASE,
+    )
+    if any(kw in lower for kw in task_keywords) or task_pattern.search(lower):
         matched.update(["add_task", "list_tasks", "complete_task", "add_note", "list_notes", "delete_note"])
     if any(kw in lower for kw in weather_keywords):
         matched.update(["predict_weather", "get_weather"])
+    if any(kw in lower for kw in memory_keywords):
+        matched.update(["remember_about_user", "recall_about_user"])
     if web_pattern.search(lower) or provider_name in ("auto", "gemini", "grok", "langgraph"):
         matched.update(["web_search", "fetch_webpage"])
 

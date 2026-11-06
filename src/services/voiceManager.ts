@@ -3,6 +3,7 @@ import { synthesize } from './ttsService';
 import { speakText, stopAllAudioAndSpeech } from './webSpeechService';
 import { ELEVENLABS_VOICE_PACK } from './elevenLabsService';
 import type { VoiceOption } from '@/types';
+import { getConvoLatencyEngine, ConvoLatencyEngine } from '@/lib/convo-latency-core';
 
 export interface PlayOptions {
   rate?: number;
@@ -49,6 +50,13 @@ class VoicePlaybackManager {
   private onSentenceStartCallback: ((sentenceText: string) => void) | null = null;
   private isQueueMode: boolean = false;
   private currentlyPlayingSentence: string = '';
+  private engine: ConvoLatencyEngine = getConvoLatencyEngine();
+  // 2500ms deduplication cache to eliminate duplicate spoken sentences
+  private recentQueuedSentences: Map<string, number> = new Map();
+
+  public getEngine(): ConvoLatencyEngine {
+    return this.engine;
+  }
 
   public getCurrentlySpokenText(): string {
     return this.currentlyPlayingSentence || useAppStore.getState().speechText || '';
@@ -166,6 +174,11 @@ class VoicePlaybackManager {
   public stopAll(reason: string = 'user_action'): void {
     this.currentSessionId++;
     this.queueSessionId++;
+    this.recentQueuedSentences.clear();
+    try {
+      this.engine.bargeIn.interrupt();
+    } catch {}
+
     for (const b of this.activeBlobUrls) {
       try { URL.revokeObjectURL(b); } catch {}
     }
@@ -238,10 +251,49 @@ class VoicePlaybackManager {
     onTurnComplete?: () => void,
     onSentenceStart?: (sentenceText: string) => void
   ): void {
+    this.recentQueuedSentences.clear();
     this.isStreamActive = true;
     this.isQueueMode = true;
     this.onQueueEmptyCallback = onTurnComplete || null;
     this.onSentenceStartCallback = onSentenceStart || null;
+
+    const voice = this.resolveCurrentVoice();
+    this.engine.filler.setVoice(voice.id);
+
+    // Register WebAudio gapless scheduler callbacks
+    this.engine.scheduler.setCallbacks({
+      onSentenceStart: (sentenceText: string, isFiller?: boolean) => {
+        this.currentlyPlayingSentence = sentenceText;
+        const store = useAppStore.getState();
+        store.setIsSpeaking(true);
+        store.setPlaybackState('playing');
+        store.setSpeechText(sentenceText);
+        this.onSentenceStartCallback?.(sentenceText);
+      },
+      onSentenceEnd: (sentenceText: string) => {
+        if (this.currentlyPlayingSentence === sentenceText) {
+          this.currentlyPlayingSentence = '';
+        }
+      },
+      onQueueEmpty: () => {
+        if (!this.isStreamActive && this.sentenceQueue.length === 0 && !this.isProcessingQueue) {
+          this.isQueueMode = false;
+          this.activeChannel = null;
+          const state = useAppStore.getState();
+          state.setPlaybackState('idle');
+          state.setIsSpeaking(false);
+          state.setCurrentWordIndex(-1);
+          if (state.agentStatus === 'speaking') {
+            state.setAgentStatus('idle');
+          }
+          if (this.onQueueEmptyCallback) {
+            const cb = this.onQueueEmptyCallback;
+            this.onQueueEmptyCallback = null;
+            cb();
+          }
+        }
+      }
+    });
   }
 
   public resolveCurrentVoice(): VoiceOption {
@@ -322,22 +374,59 @@ class VoicePlaybackManager {
   public enqueueSentence(sentence: string, onQueueEmpty?: () => void): void {
     const trimmed = sentence.trim();
     if (!trimmed) return;
+
+    // Deduplication guard: ignore identical sentences received within 2500ms
+    const normalized = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const now = Date.now();
+    const lastTime = this.recentQueuedSentences.get(normalized);
+    if (lastTime && now - lastTime < 2500) {
+      console.log('[VoiceManager] Deduplicated repeated sentence:', trimmed);
+      return;
+    }
+    this.recentQueuedSentences.set(normalized, now);
+    if (this.recentQueuedSentences.size > 50) {
+      for (const [k, v] of this.recentQueuedSentences.entries()) {
+        if (now - v > 6000) this.recentQueuedSentences.delete(k);
+      }
+    }
+
     this.isQueueMode = true;
     if (onQueueEmpty && !this.onQueueEmptyCallback) {
       this.onQueueEmptyCallback = onQueueEmpty;
     }
 
-    const item: QueuedSentenceItem = { text: trimmed };
     const voice = this.resolveCurrentVoice();
+    const streamUrl = `/api/tts-stream?text=${encodeURIComponent(trimmed)}&voice=${encodeURIComponent(voice.id)}`;
 
-    // Immediately pre-fetch audio in the background for this sentence if Neural audio backend is active
+    // Fast-path: WebAudio arrayBuffer fetch and gapless schedule
+    fetch(streamUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error('Stream error');
+        return res.arrayBuffer();
+      })
+      .then((arrayBuf) => this.engine.scheduler.decodeAudioData(arrayBuf))
+      .then((audioBuffer) => {
+        if (audioBuffer && this.isQueueMode) {
+          this.activeChannel = 'audio';
+          this.engine.scheduler.schedule(audioBuffer, trimmed, false);
+        } else {
+          this.fallbackEnqueue(trimmed);
+        }
+      })
+      .catch(() => {
+        this.fallbackEnqueue(trimmed);
+      });
+  }
+
+  private fallbackEnqueue(trimmed: string): void {
+    const voice = this.resolveCurrentVoice();
+    const item: QueuedSentenceItem = { text: trimmed };
     if (voice.backend === 'azure' || voice.backend === 'elevenlabs') {
       item.blobUrlPromise = this.prefetchSentenceAudio(trimmed, voice).then((url) => {
         if (url) item.blobUrl = url;
         return url;
       });
     }
-
     this.sentenceQueue.push(item);
     if (!this.isProcessingQueue) {
       this.processNextSentence();
@@ -350,7 +439,8 @@ class VoicePlaybackManager {
    */
   public notifyStreamDone(): void {
     this.isStreamActive = false;
-    if (this.sentenceQueue.length === 0 && !this.isProcessingQueue) {
+    const isWebAudioBusy = this.engine.scheduler.isPlaying();
+    if (this.sentenceQueue.length === 0 && !this.isProcessingQueue && !isWebAudioBusy) {
       this.isQueueMode = false;
       this.activeChannel = null;
       const state = useAppStore.getState();

@@ -61,6 +61,33 @@ export const useAppStore = create<AppState>((set) => ({
   isDarkTheme: true,
   auraState: 'sleeping',
   setAuraState: (auraState) => set({ auraState }),
+  // Native Gemini Live voice is the default (lowest latency, real emotional prosody).
+  // v2 key: the old key was silently overwritten by the server on every connect, so it
+  // never reflected an actual user choice.
+  voiceMode: typeof window !== 'undefined'
+    ? ((localStorage.getItem('aura_voice_mode_v2') as 'custom_voice_pack' | 'native_gemini_live') || 'native_gemini_live')
+    : 'native_gemini_live',
+  setVoiceMode: (voiceMode) => {
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('aura_voice_mode_v2', voiceMode); } catch {}
+    }
+    set({ voiceMode });
+  },
+  liveVoice: typeof window !== 'undefined'
+    ? (localStorage.getItem('aura_live_voice') || 'Aoede')
+    : 'Aoede',
+  setLiveVoice: (liveVoice) => {
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('aura_live_voice', liveVoice); } catch {}
+    }
+    set({ liveVoice });
+  },
+  isGeminiLiveConnected: false,
+  setIsGeminiLiveConnected: (isGeminiLiveConnected) => set({ isGeminiLiveConnected }),
+  isUserSpeaking: false,
+  setIsUserSpeaking: (isUserSpeaking) => set({ isUserSpeaking }),
+  liveUserCaption: '',
+  setLiveUserCaption: (liveUserCaption) => set({ liveUserCaption }),
 
   error: null,
 

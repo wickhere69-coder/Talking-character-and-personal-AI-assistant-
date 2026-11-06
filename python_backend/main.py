@@ -22,8 +22,15 @@ async def lifespan(app: FastAPI):
     # Initialize SQLite database and run legacy migration
     store = get_memory_store()
     await store.init_db()
-    logger.info("Database ready. Active provider: %s", settings.model_provider)
+    logger.info(
+        "Database ready. Live voice: %s (%s, voice=%s) | text brain: %s",
+        settings.gemini_live_model, settings.voice_mode, settings.gemini_live_voice,
+        " → ".join(settings.gemini_model_chain),
+    )
     yield
+    from agent.tools.weather_tools import close_shared_session
+
+    await close_shared_session()
     logger.info("Python Aura AI Backend shutting down.")
 
 

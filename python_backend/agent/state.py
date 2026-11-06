@@ -8,13 +8,18 @@ from langchain_core.messages import BaseMessage
 from typing_extensions import TypedDict
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     """State passed through the LangGraph agent graph."""
 
     messages: Annotated[Sequence[BaseMessage], operator.add]
     session_id: str
     request_id: str
     config: dict
+    # Live facts gathered before the first LLM call (weather, web search) and
+    # extra directives; folded into the system prompt rather than appended as
+    # stray system messages mid-conversation.
+    context_blocks: list
+    thinking_level: Optional[str]
     tool_results: list
     accumulated_text: str
     is_done: bool

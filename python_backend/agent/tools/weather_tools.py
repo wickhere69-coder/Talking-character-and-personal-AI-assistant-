@@ -89,8 +89,48 @@ def _sanitize_location(raw: str) -> str:
     return cleaned
 
 
+# Geocodes never change and forecasts change slowly — cache both so a repeat question
+# answers instantly instead of blocking a live voice turn on the network.
+_GEO_CACHE: Dict[str, Dict[str, Any]] = {}
+_FORECAST_CACHE: Dict[str, Any] = {}
+_FORECAST_TTL_S = 600
+_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=5)
+
+# One pooled session per event loop: keep-alive means repeat lookups skip the TLS
+# handshake (~1.7 s per new connection on slow networks).
+_SESSION: Optional[aiohttp.ClientSession] = None
+_SESSION_LOOP: Any = None
+
+
+def _shared_session() -> aiohttp.ClientSession:
+    global _SESSION, _SESSION_LOOP
+    loop = asyncio.get_running_loop()
+    if _SESSION is None or _SESSION.closed or _SESSION_LOOP is not loop:
+        _SESSION = aiohttp.ClientSession(connector=aiohttp.TCPConnector(keepalive_timeout=60, limit=8))
+        _SESSION_LOOP = loop
+    return _SESSION
+
+
+async def close_shared_session() -> None:
+    global _SESSION
+    if _SESSION is not None and not _SESSION.closed:
+        await _SESSION.close()
+    _SESSION = None
+
+
+class _BorrowedSession:
+    async def __aenter__(self) -> aiohttp.ClientSession:
+        return _shared_session()
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
 async def _geocode(session: aiohttp.ClientSession, location_query: str) -> Optional[Dict[str, Any]]:
-    """Call Open-Meteo Geocoding API."""
+    """Call Open-Meteo Geocoding API (cached)."""
+    cache_key = location_query.strip().lower()
+    if cache_key in _GEO_CACHE:
+        return _GEO_CACHE[cache_key]
     candidates = [
         _sanitize_location(location_query),
         location_query.strip().replace("?!.,", ""),
@@ -108,12 +148,13 @@ async def _geocode(session: aiohttp.ClientSession, location_query: str) -> Optio
                 "https://geocoding-api.open-meteo.com/v1/search"
                 f"?name={quote(name)}&count=5&language=en&format=json"
             )
-            async with session.get(geo_url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+            async with session.get(geo_url, timeout=_HTTP_TIMEOUT) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     results = data.get("results", [])
                     if results:
                         results.sort(key=lambda r: r.get("population", 0), reverse=True)
+                        _GEO_CACHE[cache_key] = results[0]
                         return results[0]
         except Exception as exc:
             logger.debug("Geocode error for %s: %s", name, exc)
@@ -135,9 +176,87 @@ async def predict_weather(location: str, days: int = 3) -> Dict[str, Any]:
         }
 
     forecast_days = max(1, min(int(days or 3), 7))
+    import time as _time
+    fkey = f"{location_query.lower()}|{forecast_days}"
+    cached = _FORECAST_CACHE.get(fkey)
+    if cached and _time.monotonic() - cached[0] < _FORECAST_TTL_S:
+        return cached[1]
 
+    result = await _race_providers(location_query, forecast_days)
+    if result.get("success"):
+        _FORECAST_CACHE[fkey] = (_time.monotonic(), result)
+    return result
+
+
+async def _race_providers(location_query: str, forecast_days: int) -> Dict[str, Any]:
+    """Ask Open-Meteo and wttr.in at once; the first good answer wins.
+
+    A voice turn is blocked while this runs, so one slow provider shouldn't mean silence.
+    """
+    tasks = {
+        asyncio.create_task(_predict_weather_uncached(location_query, forecast_days)),
+        asyncio.create_task(_wttr_weather(location_query, forecast_days)),
+    }
+    last: Optional[Dict[str, Any]] = None
     try:
-        async with aiohttp.ClientSession() as session:
+        while tasks:
+            done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                try:
+                    res = t.result()
+                except Exception as exc:  # noqa: BLE001
+                    res = {"success": False, "error": str(exc), "message": f"Weather lookup failed: {exc}"}
+                if res.get("success"):
+                    return res
+                last = res
+    finally:
+        for t in tasks:
+            t.cancel()
+    return last or {"success": False, "error": "unavailable", "message": f'Could not get the weather for "{location_query}" right now.'}
+
+
+async def _wttr_weather(location_query: str, forecast_days: int) -> Dict[str, Any]:
+    """Backup provider: wttr.in JSON (single request, no separate geocoding step)."""
+    from urllib.parse import quote
+
+    session = _shared_session()
+    url = f"https://wttr.in/{quote(_sanitize_location(location_query))}?format=j1"
+    async with session.get(url, timeout=_HTTP_TIMEOUT, headers={"User-Agent": "curl/8"}) as resp:
+        if resp.status != 200:
+            return {"success": False, "error": f"wttr.in HTTP {resp.status}", "message": "Weather backup unavailable."}
+        data = await resp.json(content_type=None)
+    cur = (data.get("current_condition") or [{}])[0]
+    area = (data.get("nearest_area") or [{}])[0]
+    # wttr.in reports the nearest weather-station neighbourhood (e.g. "Sowcarpet" for
+    # Chennai) — keep the place name the user actually asked about.
+    name = ", ".join(filter(None, [
+        _sanitize_location(location_query).title(),
+        ((area.get("region") or [{}])[0]).get("value"),
+        ((area.get("country") or [{}])[0]).get("value"),
+    ])) or location_query
+    cond = ((cur.get("weatherDesc") or [{}])[0]).get("value", "").strip() or "Unknown"
+    t_c, fl_c = int(cur.get("temp_C", 0)), int(cur.get("FeelsLikeC", 0))
+    lines = []
+    for idx, day in enumerate((data.get("weather") or [])[:forecast_days]):
+        label = "Today" if idx == 0 else "Tomorrow" if idx == 1 else f"Day {idx + 1} ({day.get('date')})"
+        hourly = day.get("hourly") or []
+        rain = max((int(h.get("chanceofrain", 0) or 0) for h in hourly), default=0)
+        mid = hourly[len(hourly) // 2] if hourly else {}
+        dcond = ((mid.get("weatherDesc") or [{}])[0]).get("value", cond).strip()
+        hi, lo = int(day.get("maxtempC", 0)), int(day.get("mintempC", 0))
+        lines.append(f"• {label}: {dcond}, High {hi}°C ({_c_to_f(hi)}°F) / Low {lo}°C ({_c_to_f(lo)}°F), {rain}% chance of rain.")
+    message = (
+        f"Weather forecast for {name}:\n"
+        f"Currently: {cond}, {t_c}°C ({_c_to_f(t_c)}°F), feels like {fl_c}°C ({_c_to_f(fl_c)}°F). "
+        f"Humidity: {cur.get('humidity', '?')}%, Wind: {cur.get('windspeedKmph', '?')} km/h.\n"
+        "Predictions:\n" + "\n".join(lines)
+    )
+    return {"success": True, "message": message, "data": {"location": name, "source": "wttr.in"}}
+
+
+async def _predict_weather_uncached(location_query: str, forecast_days: int) -> Dict[str, Any]:
+    try:
+        async with _BorrowedSession() as session:
             loc = await _geocode(session, location_query)
             if not loc:
                 return {
@@ -157,7 +276,7 @@ async def predict_weather(location: str, days: int = 3) -> Dict[str, Any]:
                 f"&timezone=auto&forecast_days={forecast_days}"
             )
 
-            async with session.get(weather_url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+            async with session.get(weather_url, timeout=_HTTP_TIMEOUT) as resp:
                 if resp.status != 200:
                     return {
                         "success": False,

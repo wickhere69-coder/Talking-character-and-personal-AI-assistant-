@@ -108,7 +108,19 @@ export class ProceduralAnimation {
     this.meshes = meshes;
   }
 
-  update(delta: number, isSpeaking: boolean, agentStatus = 'idle', emotion: string = 'neutral'): void {
+  private emotionIntensity = 0.5;
+  private userSpeaking = false;
+
+  update(
+    delta: number,
+    isSpeaking: boolean,
+    agentStatus = 'idle',
+    emotion: string = 'neutral',
+    intensity: number = 0.5,
+    userSpeaking: boolean = false,
+  ): void {
+    this.emotionIntensity = THREE.MathUtils.damp(this.emotionIntensity, THREE.MathUtils.clamp(intensity, 0, 1), 3, delta);
+    this.userSpeaking = userSpeaking;
     const isThinking = agentStatus === 'thinking' || agentStatus === 'executing_tool';
     const isListening = agentStatus === 'listening';
 
@@ -186,13 +198,13 @@ export class ProceduralAnimation {
         this.nodTimer = 2.5 + Math.random() * 2.5;
       }
     } else if (agentStatus === 'listening') {
-      // Attentive listening micro-nod every 3.5 - 5 seconds
+      // Attentive listening: small "mm-hm" nods — more often while the user is actually talking
       this.nodTimer -= delta;
       if (this.nodTimer <= 0) {
         this.isNodding = true;
         this.nodPhase = 0;
         this.nodIntensity = 0;
-        this.nodTimer = 3.5 + Math.random() * 2.0;
+        this.nodTimer = this.userSpeaking ? 1.6 + Math.random() * 1.6 : 3.5 + Math.random() * 2.0;
       }
     } else {
       this.isNodding = false;
@@ -322,6 +334,15 @@ export class ProceduralAnimation {
         targetInnerUp = 0.06;
         break;
     }
+
+    // Scale the emotion away from the neutral baseline by its intensity, so a mild
+    // feeling reads as a hint and a strong one reads clearly.
+    const k = 0.55 + this.emotionIntensity * 0.75;
+    const baseSmile = isSpeaking ? 0.12 : 0.16;
+    targetSmile = THREE.MathUtils.clamp(baseSmile + (targetSmile - baseSmile) * k, 0, 0.45);
+    targetInnerUp = THREE.MathUtils.clamp(0.06 + (targetInnerUp - 0.06) * k, 0, 0.4);
+    targetSquint = THREE.MathUtils.clamp(targetSquint * k, 0, 0.3);
+    targetWide = THREE.MathUtils.clamp(targetWide * k, 0, 0.3);
 
     // Subtle eyebrow lift on open vowels during speech OR while thinking
     if (agentStatus === 'thinking' || agentStatus === 'executing_tool') {

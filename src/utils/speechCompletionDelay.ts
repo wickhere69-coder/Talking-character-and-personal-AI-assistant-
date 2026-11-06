@@ -39,9 +39,9 @@ export function getSpeechCompletionDelay(
 
   // 3. Clear terminal question/period (user finished their question)
   if (endsWithTerminalPunctuation) {
-    return isFinal ? 750 : 1000;
+    return isFinal ? 500 : 750;
   }
 
-  // 4. Standard conversational pause between sentences (natural breathing room)
-  return isFinal ? 1000 : 1300;
+  // 4. Standard conversational pause between sentences (snappy turn-taking)
+  return isFinal ? 650 : 900;
 }

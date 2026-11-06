@@ -29,7 +29,7 @@ def test_websocket():
         test_session_id = "test_ws_session"
         events_received = []
         
-        with client.websocket_connect(f"/ws/{test_session_id}") as websocket:
+        with client.websocket_connect(f"/ws/{test_session_id}?voice_mode=custom_voice_pack") as websocket:
             print("[OK] WebSocket connected!")
             
             # Send message
@@ -71,7 +71,7 @@ def test_barge_in_and_resumption():
     with TestClient(app) as client:
         test_session_id = "test_bargein_session"
         
-        with client.websocket_connect(f"/ws/{test_session_id}") as websocket:
+        with client.websocket_connect(f"/ws/{test_session_id}?voice_mode=custom_voice_pack") as websocket:
             print("[OK] Connected for Barge-In test")
             
             # 1. Start a long speech turn
