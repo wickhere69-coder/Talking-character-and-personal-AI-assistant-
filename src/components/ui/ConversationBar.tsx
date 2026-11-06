@@ -42,7 +42,7 @@ export default function ConversationBar() {
   const handleSend = (textToSend?: string) => {
     const raw = typeof textToSend === 'string' ? textToSend : inputText;
     const trimmed = raw.trim();
-    if (!trimmed || isBusy) return;
+    if (!trimmed) return;
 
     setInputText('');
     setScriptText('');
@@ -165,7 +165,7 @@ export default function ConversationBar() {
           <button
             type="button"
             onClick={() => handleSend(inputText || scriptText)}
-            disabled={(!inputText.trim() && !(isListening && scriptText.trim())) || isBusy}
+            disabled={!inputText.trim() && !(isListening && scriptText.trim())}
             className="w-10 h-10 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center shadow-[0_2px_12px_rgba(139,124,255,0.4)] text-[#FFFFFF] font-bold shrink-0 cursor-pointer"
             title="Send message"
           >

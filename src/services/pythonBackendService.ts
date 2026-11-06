@@ -99,9 +99,15 @@ class PythonBackendService {
     this.isIntentionallyClosed = false;
 
     const baseUrl = this.getBaseUrl();
-    const url = baseUrl.endsWith('/ws')
+    let url = baseUrl.endsWith('/ws')
       ? `${baseUrl}/${sessionId}`
       : `${baseUrl}/ws/${sessionId}`;
+
+    // If reconnecting, bypass proxy directly to port 8000 for maximum resilience
+    if (this.reconnectAttempts > 0 && typeof window !== 'undefined') {
+      const host = window.location.hostname || '127.0.0.1';
+      url = `ws://${host}:8000/ws/${sessionId}`;
+    }
 
     console.log(`[PythonBackendService] Connecting to ${url}...`);
 

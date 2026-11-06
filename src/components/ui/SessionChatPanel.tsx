@@ -68,7 +68,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
 
   const handleSend = () => {
     const trimmed = inputVal.trim();
-    if (!trimmed || isBusy) return;
+    if (!trimmed) return;
     setInputVal('');
     auraController.ask(trimmed);
   };
@@ -430,14 +430,13 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isBusy}
             placeholder={isBusy ? "Thinking..." : "Message Aura…"}
             className="flex-1 bg-transparent border-none outline-none text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86]"
           />
           <button
             type="button"
             onClick={handleSend}
-            disabled={!inputVal.trim() || isBusy}
+            disabled={!inputVal.trim()}
             className="w-8 h-8 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] disabled:opacity-40 text-white flex items-center justify-center transition active:scale-95 cursor-pointer disabled:cursor-not-allowed"
             title="Send"
           >

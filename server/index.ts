@@ -425,7 +425,7 @@ app.post('/api/save-elevenlabs-key', adminAuthMiddleware, (req, res) => {
 app.get('/api/voices', async (req, res) => {
   const backend = sanitizeString(req.query.backend, 32);
 
-  if (backend === 'elevenlabs') {
+  if (backend === 'elevenlabs' && ELEVENLABS_KEY && ELEVENLABS_KEY.startsWith('sk_')) {
     try {
       const headers: Record<string, string> = {};
       if (ELEVENLABS_KEY) headers['xi-api-key'] = ELEVENLABS_KEY;

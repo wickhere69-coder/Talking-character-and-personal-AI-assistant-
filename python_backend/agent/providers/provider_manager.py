@@ -20,13 +20,20 @@ class ResilientGeminiModel:
         self._fallback = fallback_llm
         self.model_name = model_name
         self.model = model_name
+        self._failed_over = False
 
     async def astream(self, messages: Any, **kwargs: Any):
+        if self._failed_over and self._fallback:
+            async for chunk in self._fallback.astream(messages, **kwargs):
+                yield chunk
+            return
+
         try:
             async for chunk in self._primary.astream(messages, **kwargs):
                 yield chunk
         except Exception as e:
-            logger.warning("Primary Gemini model (%s) failed (%s), failing over...", self.model_name, e)
+            logger.warning("Primary Gemini model (%s) failed (%s), permanently locking to fallback for ultra-low latency...", self.model_name, e)
+            self._failed_over = True
             if self._fallback:
                 async for chunk in self._fallback.astream(messages, **kwargs):
                     yield chunk
@@ -34,19 +41,27 @@ class ResilientGeminiModel:
                 raise
 
     async def ainvoke(self, messages: Any, **kwargs: Any):
+        if self._failed_over and self._fallback:
+            return await self._fallback.ainvoke(messages, **kwargs)
+
         try:
             return await self._primary.ainvoke(messages, **kwargs)
         except Exception as e:
-            logger.warning("Primary Gemini model (%s) ainvoke failed (%s), failing over...", self.model_name, e)
+            logger.warning("Primary Gemini model (%s) ainvoke failed (%s), permanently locking to fallback for ultra-low latency...", self.model_name, e)
+            self._failed_over = True
             if self._fallback:
                 return await self._fallback.ainvoke(messages, **kwargs)
             raise
 
     def invoke(self, messages: Any, **kwargs: Any):
+        if self._failed_over and self._fallback:
+            return self._fallback.invoke(messages, **kwargs)
+
         try:
             return self._primary.invoke(messages, **kwargs)
         except Exception as e:
-            logger.warning("Primary Gemini model (%s) invoke failed (%s), failing over...", self.model_name, e)
+            logger.warning("Primary Gemini model (%s) invoke failed (%s), permanently locking to fallback for ultra-low latency...", self.model_name, e)
+            self._failed_over = True
             if self._fallback:
                 return self._fallback.invoke(messages, **kwargs)
             raise

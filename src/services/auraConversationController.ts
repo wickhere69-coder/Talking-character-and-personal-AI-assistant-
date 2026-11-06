@@ -416,19 +416,20 @@ class AuraConversationController {
     voiceManager.setOnPlaybackEnd(null);
 
     const sessionStore = useSessionStore.getState();
-    const currentSessionId = sessionStore.activeSessionId;
+    const currentSessionId = sessionStore.activeSessionId || 'session_default_general';
+    if (!sessionStore.activeSessionId) {
+      sessionStore.selectSession(currentSessionId);
+    }
 
     // 1. Append user message immediately to the active session
-    if (currentSessionId) {
-      sessionStore.appendLocalMessage({
-        id: `msg_u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        sessionId: currentSessionId,
-        role: 'user',
-        content: trimmed,
-        createdAt: Date.now(),
-        status: 'delivered'
-      });
-    }
+    sessionStore.appendLocalMessage({
+      id: `msg_u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sessionId: currentSessionId,
+      role: 'user',
+      content: trimmed,
+      createdAt: Date.now(),
+      status: 'delivered'
+    });
 
     // 2. Set state to thinking - DO NOT show subtitle text yet
     this.setState('thinking');
@@ -492,17 +493,15 @@ class AuraConversationController {
         spokenSoFar += (spokenSoFar ? ' ' : '') + sentenceText;
         this.lastSpokenAnswer = spokenSoFar;
         this.store.setCurrentEmotion(detectEmotion(sentenceText));
-        if (currentSessionId) {
-          useSessionStore.getState().appendLocalMessage({
-            id: assistantMsgId,
-            sessionId: currentSessionId,
-            role: 'assistant',
-            content: spokenSoFar,
-            createdAt: Date.now(),
-            status: 'delivered',
-            modelUsed: providerToSend
-          });
-        }
+        useSessionStore.getState().appendLocalMessage({
+          id: assistantMsgId,
+          sessionId: currentSessionId,
+          role: 'assistant',
+          content: spokenSoFar,
+          createdAt: Date.now(),
+          status: 'delivered',
+          modelUsed: providerToSend
+        });
       }
     );
 

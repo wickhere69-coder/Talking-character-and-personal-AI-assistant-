@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "models/gemini-3-flash-preview"
+    gemini_model: str = "models/gemini-3.5-flash-lite"
     gemini_fallback_model: str = "models/gemini-3.5-flash-lite"
 
     # Grok / xAI
