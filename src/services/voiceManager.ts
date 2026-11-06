@@ -608,24 +608,12 @@ class VoicePlaybackManager {
     } catch (err: any) {
       if (sessionId !== this.currentSessionId) return;
 
-      console.warn(`[TTS REQUEST] Neural stream notice:`, err?.message || err);
+      console.warn(`[TTS REQUEST] Neural stream notice, seamlessly falling back to Web Speech:`, err?.message || err);
       this.hardStopAudio();
       const store = useAppStore.getState();
       store.setAudioUrl(null);
-      store.setPlaybackState('idle');
-      store.setIsSpeaking(false);
-      if (err?.message) {
-        store.setError(`Voice notice: ${err.message}`);
-      }
-
-      // CRITICAL: Always invoke sentence completion callbacks so streaming conversation pipeline never freezes
-      if (this.currentSentenceEndCallback) {
-        const cb = this.currentSentenceEndCallback;
-        this.currentSentenceEndCallback = null;
-        cb();
-      } else if (this.onPlaybackEndCallback) {
-        this.onPlaybackEndCallback();
-      }
+      // Fallback directly to browser Web Speech API so voice and text NEVER fail
+      this.playWithWebSpeech(textToDisplay || text, voice, sessionId);
     }
   }
 

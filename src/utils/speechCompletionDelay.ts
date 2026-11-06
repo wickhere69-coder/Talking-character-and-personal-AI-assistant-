@@ -29,19 +29,19 @@ export function getSpeechCompletionDelay(
 
   // 1. Incomplete connector or filler word (user is pausing to think mid-sentence)
   if (endsWithIncompleteWord) {
-    return 1400;
+    return 1800;
   }
 
   // 2. Short beginning (< 4 words without punctuation, e.g. "Can you tell me")
   if (words.length <= 4 && !endsWithTerminalPunctuation) {
-    return 1200;
+    return 1500;
   }
 
   // 3. Clear terminal question/period (user finished their question)
   if (endsWithTerminalPunctuation) {
-    return isFinal ? 350 : 700;
+    return isFinal ? 750 : 1000;
   }
 
-  // 4. Standard conversational pause between sentences
-  return isFinal ? 450 : 850;
+  // 4. Standard conversational pause between sentences (natural breathing room)
+  return isFinal ? 1000 : 1300;
 }

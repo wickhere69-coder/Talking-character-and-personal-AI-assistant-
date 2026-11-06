@@ -54,6 +54,12 @@ export class ProceduralAnimation {
   private isNodding: boolean = false;
   private nodIntensity: number = 0;
 
+  // Navarasa expressive face blendshape targets & damping
+  private currentSmile: number = 0.12;
+  private currentSquint: number = 0;
+  private currentWide: number = 0;
+  private currentInnerUp: number = 0.05;
+
   constructor(
     meshes: THREE.SkinnedMesh[], 
     bones: CharacterBones
@@ -254,74 +260,73 @@ export class ProceduralAnimation {
 
   private updateExpression(delta: number, isSpeaking: boolean, agentStatus = 'idle', emotion: string = 'neutral'): void {
     // Navarasa 9-Essence facial blendshape modulation
-    let targetSmile = isSpeaking ? 0.08 : 0.12;
-    let targetInnerUp = 0;
+    let targetSmile = isSpeaking ? 0.12 : 0.16;
+    let targetInnerUp = 0.06;
     let targetSquint = 0;
     let targetWide = 0;
 
     switch (emotion) {
       case 'shringara':
       case 'happy':
-        targetSmile = isSpeaking ? 0.16 : 0.22;
-        targetSquint = 0.08;
+        targetSmile = isSpeaking ? 0.22 : 0.28;
+        targetSquint = 0.12;
+        targetInnerUp = 0.08;
         break;
       case 'hasya':
       case 'amused':
-        targetSmile = isSpeaking ? 0.22 : 0.28;
-        targetSquint = 0.12;
+        targetSmile = isSpeaking ? 0.28 : 0.36;
+        targetSquint = 0.16;
+        targetInnerUp = 0.08;
         break;
       case 'karuna':
       case 'empathetic':
-        targetSmile = 0.04;
-        targetInnerUp = 0.20; // gentle compassionate brow raise
+        targetSmile = 0.06;
+        targetInnerUp = 0.26; // gentle compassionate brow raise
+        targetSquint = 0.06;
         break;
       case 'adbhuta':
       case 'curious':
       case 'surprised':
-        targetInnerUp = 0.22;
-        targetWide = 0.14;
-        targetSmile = 0.10;
+        targetInnerUp = 0.28;
+        targetWide = 0.18;
+        targetSmile = 0.14;
         break;
       case 'vira':
       case 'confident':
-        targetSmile = 0.10;
+        targetSmile = 0.16;
+        targetSquint = 0.08;
+        targetInnerUp = 0.10;
         break;
       case 'bhayanaka':
       case 'concerned':
-        targetInnerUp = 0.14;
-        targetWide = 0.10;
-        targetSmile = 0.03;
+        targetInnerUp = 0.24;
+        targetWide = 0.14;
+        targetSmile = 0.02;
         break;
       case 'bibhatsa':
       case 'thoughtful':
-        targetInnerUp = 0.10;
-        targetSmile = 0.05;
+        targetInnerUp = 0.20;
+        targetSquint = 0.10;
+        targetSmile = 0.08;
         break;
       case 'raudra':
       case 'excited':
-        targetSmile = 0.14;
-        targetWide = 0.08;
+        targetSmile = 0.22;
+        targetWide = 0.14;
+        targetInnerUp = 0.16;
         break;
       case 'shanta':
       case 'neutral':
       default:
-        targetSmile = isSpeaking ? 0.06 : 0.10;
+        targetSmile = isSpeaking ? 0.12 : 0.16;
+        targetInnerUp = 0.06;
         break;
     }
 
-    // Dynamic mouth smile
-    this.applyBlendShape('mouthSmileLeft', targetSmile);
-    this.applyBlendShape('mouthSmileRight', targetSmile);
-
-    // Dynamic eyes squint & wide
-    this.applyBlendShape('eyeSquintLeft', targetSquint);
-    this.applyBlendShape('eyeSquintRight', targetSquint);
-    this.applyBlendShape('eyeWideLeft', targetWide);
-    this.applyBlendShape('eyeWideRight', targetWide);
-
     // Subtle eyebrow lift on open vowels during speech OR while thinking
     if (agentStatus === 'thinking' || agentStatus === 'executing_tool') {
-      targetInnerUp = Math.max(targetInnerUp, 0.16); // curious/thinking eyebrow raise
+      targetInnerUp = Math.max(targetInnerUp, 0.22); // curious/thinking eyebrow raise
+      targetSmile = Math.max(targetSmile, 0.10);
     } else if (isSpeaking) {
       let jawOpen = 0;
       if (this.meshes.length > 0 && this.meshes[0].morphTargetDictionary) {
@@ -331,20 +336,24 @@ export class ProceduralAnimation {
         }
       }
       if (jawOpen > 0.35) {
-        targetInnerUp = Math.max(targetInnerUp, 0.15);
-      }
-    }
-    
-    let currentInnerUp = 0;
-    if (this.meshes.length > 0 && this.meshes[0].morphTargetDictionary) {
-      const idx = this.meshes[0].morphTargetDictionary['browInnerUp'];
-      if (idx !== undefined && this.meshes[0].morphTargetInfluences) {
-        currentInnerUp = this.meshes[0].morphTargetInfluences[idx];
+        targetInnerUp = Math.max(targetInnerUp, 0.18);
       }
     }
 
-    const nextInnerUp = THREE.MathUtils.damp(currentInnerUp, targetInnerUp, 10, delta);
-    this.applyBlendShape('browInnerUp', nextInnerUp);
+    // Smoothly damp all blendshapes so facial transitions are organic and lifelike
+    this.currentSmile = THREE.MathUtils.damp(this.currentSmile, targetSmile, 10, delta);
+    this.currentSquint = THREE.MathUtils.damp(this.currentSquint, targetSquint, 10, delta);
+    this.currentWide = THREE.MathUtils.damp(this.currentWide, targetWide, 10, delta);
+    this.currentInnerUp = THREE.MathUtils.damp(this.currentInnerUp, targetInnerUp, 10, delta);
+
+    // Apply blendshapes
+    this.applyBlendShape('mouthSmileLeft', this.currentSmile);
+    this.applyBlendShape('mouthSmileRight', this.currentSmile);
+    this.applyBlendShape('eyeSquintLeft', this.currentSquint);
+    this.applyBlendShape('eyeSquintRight', this.currentSquint);
+    this.applyBlendShape('eyeWideLeft', this.currentWide);
+    this.applyBlendShape('eyeWideRight', this.currentWide);
+    this.applyBlendShape('browInnerUp', this.currentInnerUp);
   }
 
   private updateGaze(delta: number, agentStatus = 'idle'): void {

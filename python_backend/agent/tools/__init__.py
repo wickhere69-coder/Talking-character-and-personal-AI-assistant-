@@ -227,14 +227,11 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
         "rain", "raining", "snow", "snowing", "wind", "sunny", "cloudy", "humidity",
         "predict weather", "storm", "celsius", "fahrenheit", "degrees"
     ]
-    web_keywords = [
-        "search online", "search the web", "search google", "search for news",
-        "google", "browse", "lookup", "look up", "find online", "search for",
-        "latest news", "current news", "breaking news", "recent news", "today's news",
-        "what is happening today", "who won", "current price of",
-        "stock price", "latest update on", "recent events", "current events",
-        "election results", "super bowl", "championship winner", "world cup score"
-    ]
+    web_pattern = re.compile(
+        r"\b(?:search|google|browse|lookup|look\s*up|find\s*(?:out|online)|news|latest|recent|current|today'?s|"
+        r"who\s*is|who\s*was|what\s*is|tell\s*me\s*about|status\s*of|stock|price|score|winner|launch)\b",
+        re.IGNORECASE
+    )
 
     matched: set[str] = set()
 
@@ -244,7 +241,7 @@ def select_relevant_tools(user_message: str, provider_name: str = "auto") -> Lis
         matched.update(["add_task", "list_tasks", "complete_task", "add_note", "list_notes", "delete_note"])
     if any(kw in lower for kw in weather_keywords):
         matched.update(["predict_weather", "get_weather"])
-    if any(kw in lower for kw in web_keywords):
+    if web_pattern.search(lower) or provider_name in ("auto", "gemini", "grok", "langgraph"):
         matched.update(["web_search", "fetch_webpage"])
 
     return [t for t in TOOL_DEFINITIONS if t["name"] in matched]

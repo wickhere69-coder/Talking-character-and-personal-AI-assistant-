@@ -80,30 +80,39 @@ async def pre_fetch_node(state: AgentState) -> Dict[str, Any]:
                     logger.warning("Pre-fetch weather failed: %s", exc)
 
     # 2. Live Web Search pre-fetch optimization
-    # Requires explicit search intents or live real-time queries (news, current events, scores, stock prices)
+    # Catches explicit search intents or live real-time queries (news, current events, scores, stock prices)
     search_keywords = re.compile(
-        r"(?:\b(?:search\s+(?:the\s+web|online|google|for)|look\s+up|google|find\s+online|browse\s+the\s+web)\b|"
-        r"\b(?:latest|breaking|today's|current|recent)\s+(?:news|events|updates|headlines)\b|"
+        r"(?:\b(?:search(?:\s+about|\s+for|\s+the\s+web|\s+online|\s+google)?|look\s*up|google|browse|find\s*(?:out|online))\b|"
+        r"\b(?:latest|breaking|today's|current|recent)\s+(?:news|events|updates|headlines|status)\b|"
         r"\b(?:stock|crypto|share)\s+price\b|"
-        r"\b(?:who\s+won|match\s+score|game\s+score|election\s+results|championship\s+winner|super\s+bowl)\b)",
+        r"\b(?:who\s+won|match\s+score|game\s+score|election\s+results|championship\s+winner|super\s+bowl)\b|"
+        r"\b(?:who\s+is|who\s+was|what\s+happened\s+to|what\s+is\s+the\s+latest\s+on)\b)",
         re.IGNORECASE
     )
     is_explicit_deep_think = bool(state.get("config", {}).get("deepThink"))
     is_search = bool(search_keywords.search(user_msg) or is_explicit_deep_think)
     if "web_search" in available_tools and is_search:
-        logger.info("Auto-enabling Deep Think web search for query: %s", user_msg[:60])
+        clean_search_query = re.sub(
+            r"^(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:search(?:\s+for|\s+about|\s+the\s+web\s+for|\s+online\s+for)?|look\s*up|google|browse|find\s*(?:out\s+about|online\s+about|out)?)\s*",
+            "",
+            user_msg,
+            flags=re.IGNORECASE
+        ).strip().rstrip("?.!")
+        search_target = clean_search_query if clean_search_query and len(clean_search_query) > 1 else user_msg
+
+        logger.info("Auto-enabling Deep Think web search for query: '%s' (extracted: '%s')", user_msg[:60], search_target)
         web_tool = TOOL_REGISTRY.get("web_search")
         if web_tool:
             try:
-                res = await web_tool["func"](query=user_msg)
+                res = await web_tool["func"](query=search_target)
                 if res.get("success") and res.get("message"):
                     tool_results.append({
                         "name": "web_search",
-                        "parameters": {"query": user_msg},
+                        "parameters": {"query": search_target},
                         "result": res,
                     })
                     msg = (
-                        f"[Live Web Search Ground Truth]: Real-time search findings for '{user_msg}':\n"
+                        f"[Live Web Search Ground Truth]: Real-time search findings for '{search_target}':\n"
                         f"{res.get('message', '')}\n"
                         f"Synthesize an articulate, accurate spoken response using these live facts."
                     )

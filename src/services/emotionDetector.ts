@@ -27,30 +27,37 @@ const RULES: PatternRule[] = [
   {
     emotion: 'happy',
     weight: 1.0,
-    patterns: [/!\s*$/, /😊|😄|🎉/],
+    patterns: [/!\s*$/, /😊|😄|🎉/, /welcome/i, /glad to/i, /nice to/i],
     keywords: [
       'great', 'wonderful', 'fantastic', 'awesome', 'love', 'glad',
       'happy', 'pleased', 'delighted', 'excellent', 'perfect', 'beautiful',
       'amazing', 'brilliant', 'magnificent', 'superb', 'terrific',
       'good news', 'congratulations', 'well done', 'nice work',
+      'good', 'nice', 'welcome', 'enjoy', 'pleasure', 'friend', 'smile',
+      'hello', 'hi', 'hey', 'greetings',
     ],
   },
   {
     emotion: 'excited',
     weight: 1.2,
-    patterns: [/!{2,}/, /can't wait/, /so excited/i],
+    patterns: [/!{2,}/, /can't wait/i, /so excited/i, /breakthrough/i],
     keywords: [
       'exciting', 'thrilling', 'incredible', 'unbelievable', 'wow',
       'absolutely', 'definitely', "let's go", 'ready', 'pumped',
+      'power', 'huge', 'fast', 'speed', 'rocket', 'launch', 'revolution',
+      'breakthrough', 'energy', 'bold', 'advance', 'future',
     ],
   },
   {
     emotion: 'curious',
-    weight: 0.8,
-    patterns: [/\?$/, /I wonder/, /what if/i, /have you considered/i],
+    weight: 1.1,
+    patterns: [/\?/, /^(what|how|why|who|where|when|can you|could you|tell me)/i, /I wonder/i, /what if/i, /have you considered/i],
     keywords: [
       'interesting', 'fascinating', 'curious', 'intriguing', 'wonder',
       'tell me more', 'how does', 'why does', 'what about', 'explore',
+      'what', 'how', 'why', 'who', 'where', 'when', 'which', 'tell me',
+      'explain', 'search', 'find', 'space', 'universe', 'mars', 'science',
+      'discover', 'inquire', 'learn',
     ],
   },
   {
@@ -66,21 +73,23 @@ const RULES: PatternRule[] = [
   {
     emotion: 'empathetic',
     weight: 1.1,
-    patterns: [/I understand/i, /that must be/i, /I can see/i],
+    patterns: [/I understand/i, /that must be/i, /I can see/i, /don't worry/i],
     keywords: [
       'sorry', 'understand', 'feel', 'tough', 'hard', 'empathize',
       'sympathize', 'support', 'here for you', 'take your time',
       'no rush', 'it\'s okay', 'don\'t worry', 'completely valid',
+      'help', 'care', 'listen', 'comfort', 'gently',
     ],
   },
   {
     emotion: 'thoughtful',
-    weight: 0.7,
-    patterns: [/on the other hand/i, /however/i, /that said/i, /consider/i],
+    weight: 0.9,
+    patterns: [/on the other hand/i, /however/i, /that said/i, /consider/i, /because/i, /for example/i],
     keywords: [
       'perhaps', 'maybe', 'consider', 'think about', 'perspective',
       'on one hand', 'alternatively', 'nuanced', 'complex', 'depends',
-      'weigh', 'balance', 'trade-off', 'reflect',
+      'weigh', 'balance', 'trade-off', 'reflect', 'because', 'reason',
+      'analyze', 'strategy', 'process', 'meaning', 'concept', 'theory',
     ],
   },
   {
@@ -94,20 +103,22 @@ const RULES: PatternRule[] = [
   },
   {
     emotion: 'amused',
-    weight: 0.9,
+    weight: 1.0,
     patterns: [/haha/i, /lol/i, /😂|😄/, /that's funny/i],
     keywords: [
       'funny', 'hilarious', 'amusing', 'laughing', 'joke', 'humor',
-      'witty', 'clever', 'heh', 'chuckle',
+      'witty', 'clever', 'heh', 'chuckle', 'fun', 'silly',
     ],
   },
   {
     emotion: 'confident',
-    weight: 0.8,
-    patterns: [/I can help/i, /here's how/i, /the answer is/i, /absolutely/i],
+    weight: 1.0,
+    patterns: [/I can help/i, /here's how/i, /the answer is/i, /founded by/i, /in fact/i],
     keywords: [
       'certainly', 'definitely', 'sure', 'exactly', 'precisely',
       'of course', 'no doubt', 'guaranteed', 'clearly', 'obviously',
+      'founded', 'established', 'succeeded', 'built', 'created',
+      'leading', 'achieved', 'proven', 'fact',
     ],
   },
 ];

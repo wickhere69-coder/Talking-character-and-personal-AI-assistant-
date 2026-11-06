@@ -61,6 +61,12 @@ class AuraConversationController {
   private lastSpokenAnswer = '';
   private intentionallyStopped = false;
   private activeRequestId: string | null = null;
+  private pendingAssistantMsg: {
+    id: string;
+    sessionId: string;
+    content: string;
+    modelUsed?: string;
+  } | null = null;
 
   private get store() {
     return useAppStore.getState();
@@ -230,8 +236,15 @@ class AuraConversationController {
   }
 
   private isEchoOfLastAnswer(text: string): boolean {
-    if (!this.lastSpokenAnswer) return false;
-    return this.isEchoOfText(text, this.lastSpokenAnswer);
+    if (this.lastSpokenAnswer && this.isEchoOfText(text, this.lastSpokenAnswer)) {
+      return true;
+    }
+    const messages = useSessionStore.getState().activeMessages;
+    const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
+    if (lastAssistantMsg?.content && this.isEchoOfText(text, lastAssistantMsg.content)) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -422,6 +435,7 @@ class AuraConversationController {
     this.store.setAgentStatus('thinking');
     this.store.setPlaybackState('loading');
     this.store.setError(null);
+    this.store.setCurrentEmotion(detectEmotion(trimmed));
     this.store.setCurrentAgentAction(
       isWebSearch
         ? 'Deep Think: Searching web & analyzing...'
@@ -476,6 +490,8 @@ class AuraConversationController {
           this.store.setAgentStatus('speaking');
         }
         spokenSoFar += (spokenSoFar ? ' ' : '') + sentenceText;
+        this.lastSpokenAnswer = spokenSoFar;
+        this.store.setCurrentEmotion(detectEmotion(sentenceText));
         if (currentSessionId) {
           useSessionStore.getState().appendLocalMessage({
             id: assistantMsgId,
@@ -531,23 +547,17 @@ class AuraConversationController {
             const finalContent = fullResponse?.trim() || accumulatedText.trim();
             const targetSession = respSessionId || currentSessionId;
 
-            if (targetSession && finalContent) {
-              useSessionStore.getState().appendLocalMessage({
-                id: assistantMsgId,
-                sessionId: targetSession,
-                role: 'assistant',
-                content: finalContent,
-                createdAt: Date.now(),
-                status: 'delivered',
-                modelUsed
-              });
-            }
+            // Retain pending complete content for sealing when audio finishes
+            this.pendingAssistantMsg = {
+              id: assistantMsgId,
+              sessionId: targetSession || 'session_default_general',
+              content: finalContent,
+              modelUsed
+            };
 
             const cleaned = cleanTextForSpeech(finalContent);
             this.lastSpokenAnswer = cleaned;
             this.store.setLastFullResponse(finalContent);
-            this.store.setCurrentEmotion(detectEmotion(finalContent));
-
             this.store.setAgentModelName('Deep Think');
             this.store.setAgentSpeed('langgraph');
           },
@@ -598,8 +608,22 @@ class AuraConversationController {
     this.store.setIsSpeaking(false);
     this.store.setPlaybackState('idle');
 
-    // Enforce 1200ms echo suppression cooldown to guarantee zero feedback loop
-    this.speechCooldownUntil = Date.now() + 1200;
+    // Seal the complete message into sessionStore when playback completes
+    if (this.pendingAssistantMsg && this.pendingAssistantMsg.content) {
+      useSessionStore.getState().appendLocalMessage({
+        id: this.pendingAssistantMsg.id,
+        sessionId: this.pendingAssistantMsg.sessionId,
+        role: 'assistant',
+        content: this.pendingAssistantMsg.content,
+        createdAt: Date.now(),
+        status: 'delivered',
+        modelUsed: this.pendingAssistantMsg.modelUsed
+      });
+      this.pendingAssistantMsg = null;
+    }
+
+    // Enforce 1500ms echo suppression cooldown to guarantee zero feedback loop
+    this.speechCooldownUntil = Date.now() + 1500;
     this.activeRecognizer?.clear();
 
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
@@ -612,7 +636,7 @@ class AuraConversationController {
         this.setState('sleeping');
         this.store.setIsListening(false);
       }
-    }, 1200);
+    }, 1500);
   }
 
   private returnToSleep(reason: string) {
