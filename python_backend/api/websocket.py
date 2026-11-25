@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import collections
 import json
 import re
 import time
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Deque, Dict, Optional, Tuple
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -30,12 +31,17 @@ from agent.graph import run_agent_turn
 from config import get_settings
 from memory.store import get_memory_store
 from utils.logger import get_logger
+from utils.security import is_allowed_ws_origin, sanitize_error_message
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
 VOICE_MODES = ("native_gemini_live", "custom_voice_pack")
+_WS_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-.:]{1,128}$")
+_MAX_WS_AUDIO_BYTES = 262_144  # 256 KB max per binary audio frame
+_MAX_WS_TEXT_BYTES = 65_536    # 64 KB max per control JSON frame
+_MAX_MESSAGE_CHARS = 8_000
 
 # ── Warm live-session parking ─────────────────────────────────────────────
 # A Gemini Live handshake costs 0.7–7 s. When a browser socket drops (page refresh,
@@ -172,7 +178,7 @@ class ClientConnection:
         self.live_forwarder: Optional[asyncio.Task] = None
         self.live_start_task: Optional[asyncio.Task] = None
         self.text_task: Optional[asyncio.Task] = None
-        self.processed_requests: Set[str] = set()
+        self.processed_requests: Deque[str] = collections.deque(maxlen=500)
         self.live_request_id: Optional[str] = None
         self.sentence_buf = SentenceBuffer()
         self._send_lock = asyncio.Lock()
@@ -237,7 +243,7 @@ class ClientConnection:
                 logger.warning("Gemini Live did not connect within the deadline (still retrying)")
         except Exception as exc:
             logger.warning("Gemini Live start failed: %s", exc)
-            await self.send_event({"type": "live.error", "error": str(exc)[:200]})
+            await self.send_event({"type": "live.error", "error": sanitize_error_message(exc, "Live session unavailable.")})
 
     async def restart_live(self) -> None:
         old = self.live
@@ -294,12 +300,12 @@ class ClientConnection:
 
     # ── text turns ───────────────────────────────────────────────────────
     async def handle_message(self, data: Dict[str, Any]) -> None:
-        content = (data.get("content") or "").strip()
-        request_id = data.get("request_id") or f"req_{int(time.time() * 1000)}"
+        content = (data.get("content") or "").replace("\x00", "").strip()[:_MAX_MESSAGE_CHARS]
+        request_id = str(data.get("request_id") or f"req_{int(time.time() * 1000)}")[:128]
         cfg = data.get("config") or {}
         if not content or request_id in self.processed_requests:
             return
-        self.processed_requests.add(request_id)
+        self.processed_requests.append(request_id)
         if self.text_task and not self.text_task.done():
             self.text_task.cancel()
 
@@ -364,7 +370,7 @@ class ClientConnection:
             logger.debug("LangGraph turn cancelled: %s", req_id)
         except Exception as exc:
             logger.error("LangGraph turn failed: %s", exc, exc_info=True)
-            await self.send_event({"type": "assistant.error", "error": str(exc), "request_id": req_id})
+            await self.send_event({"type": "assistant.error", "error": sanitize_error_message(exc), "request_id": req_id})
 
     # ── control messages ──────────────────────────────────────────────────
     async def handle_cancel(self, data: Dict[str, Any]) -> None:
@@ -397,7 +403,7 @@ class ClientConnection:
                 await self.restart_live()
 
     async def handle_switch_session(self, new_id: Optional[str]) -> None:
-        if not new_id or new_id == self.session_id:
+        if not new_id or not isinstance(new_id, str) or not _WS_SESSION_ID_RE.match(new_id) or new_id == self.session_id:
             return
         self.session_id = new_id
         if self.text_task and not self.text_task.done():
@@ -424,9 +430,14 @@ class ClientConnection:
 
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    settings = get_settings()
+    if not _WS_SESSION_ID_RE.match(session_id) or not is_allowed_ws_origin(websocket, settings.origins_list):
+        logger.warning("Rejected WebSocket connection: session=%r origin=%r", session_id[:64], websocket.headers.get("origin"))
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     conn = ClientConnection(websocket, session_id)
-    settings = conn.settings
     logger.info("WebSocket connected: session=%s voice_mode=%s voice=%s", session_id, conn.voice_mode, conn.voice)
 
     await conn.send_event({
@@ -451,17 +462,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             raw_bytes = msg.get("bytes")
             if raw_bytes:
+                if len(raw_bytes) > _MAX_WS_AUDIO_BYTES:
+                    continue
                 live = conn.ensure_live()
                 if live is not None:
                     await live.send_audio_chunk(raw_bytes)
                 continue
 
             raw_text = msg.get("text") or ""
-            if not raw_text:
+            if not raw_text or len(raw_text) > _MAX_WS_TEXT_BYTES:
                 continue
             try:
                 data = json.loads(raw_text)
             except ValueError:
+                continue
+            if not isinstance(data, dict):
                 continue
             t = data.get("type", "")
 
@@ -469,6 +484,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await conn.send_event({"type": "pong", "t": data.get("t")})
             elif t in ("audio", "live.audio"):  # legacy base64 mic frames
                 b64 = data.get("pcm") or data.get("audio") or ""
+                if not isinstance(b64, str) or len(b64) > 360_000:
+                    continue
                 live = conn.ensure_live()
                 if b64 and live is not None:
                     try:

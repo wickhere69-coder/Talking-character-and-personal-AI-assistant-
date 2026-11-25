@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     )
 
     # Server
+    host: str = "127.0.0.1"
     port: int = 8000
     debug: bool = False
     log_level: str = "info"
@@ -85,6 +86,10 @@ class Settings(BaseSettings):
     legacy_sessions_path: str = "../data/sessions.json"
     legacy_memory_path: str = "../data/memory.json"
 
+    # Authentication & Google OAuth
+    google_client_id: Optional[str] = None
+    vite_google_client_id: Optional[str] = None
+
     # Session memory config
     max_history_turns: int = 8
     max_long_term_memories: int = 50
@@ -94,6 +99,13 @@ class Settings(BaseSettings):
     def origins_list(self) -> List[str]:
         """Return CORS origins as a list."""
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def effective_google_client_id(self) -> Optional[str]:
+        raw = (self.google_client_id or self.vite_google_client_id or "").strip()
+        if raw and not raw.startswith("your_"):
+            return raw
+        return None
 
     @property
     def effective_grok_key(self) -> Optional[str]:

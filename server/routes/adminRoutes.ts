@@ -14,7 +14,7 @@ import { AgentCore } from '../agent/AgentCore';
 import { isSupabaseConfigured, getSupabaseCredentials, testSupabaseConnection, updateSupabaseCredentials } from '../db/supabaseClient';
 import { persistEnvVar } from '../utils/envUtils';
 import { timingSafeCompare, createAdminToken, verifyAdminToken } from '../utils/authUtils';
-import { sanitizeString } from '../utils/sanitizer';
+import { sanitizeString, isSafeHttpUrl, sanitizeErrorMessage } from '../utils/sanitizer';
 
 /**
  * Dynamically resolves the current admin secret from .env so password updates
@@ -192,7 +192,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
         }
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -226,8 +226,9 @@ export function createAdminRouter(agentCore: AgentCore): Router {
   // ── GET /api/admin/keys ── View configured API keys (masked)
   router.get('/keys', (req, res) => {
     const mask = (key?: string) => {
-      if (!key?.trim()) return null;
-      return key.substring(0, 8) + '...' + key.slice(-4);
+      const trimmed = key?.trim();
+      if (!trimmed) return null;
+      return trimmed.length >= 16 ? '****' + trimmed.slice(-4) : '****';
     };
 
     res.json({
@@ -237,7 +238,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
       anthropic: { configured: !!process.env.ANTHROPIC_API_KEY?.trim(), masked: mask(process.env.ANTHROPIC_API_KEY) },
       openai: { configured: !!process.env.OPENAI_API_KEY?.trim(), masked: mask(process.env.OPENAI_API_KEY) },
       tavily: { configured: !!process.env.TAVILY_API_KEY?.trim(), masked: mask(process.env.TAVILY_API_KEY) },
-      adminSecret: { configured: true, masked: mask(process.env.ADMIN_SECRET) }
+      adminSecret: { configured: Boolean(getLiveAdminSecret()), masked: getLiveAdminSecret() ? '••••••••' : null }
     });
   });
 
@@ -263,7 +264,10 @@ export function createAdminRouter(agentCore: AgentCore): Router {
     const envVar = keyMap[cleanProvider];
     if (!envVar) return res.status(400).json({ error: `Unknown provider: ${cleanProvider}` });
 
-    const safeKey = sanitizeString(apiKey, 512).replace(/[\r\n]/g, '');
+    const safeKey = sanitizeString(apiKey, 512).replace(/[\r\n\0]/g, '');
+    if (cleanProvider === 'admin' && safeKey.length < 12) {
+      return res.status(400).json({ error: 'Admin secret must be at least 12 characters.' });
+    }
     process.env[envVar] = safeKey;
     if (cleanProvider === 'grok') process.env.XAI_API_KEY = safeKey;
 
@@ -273,7 +277,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
       persistEnvVar(envVar, safeKey);
       if (cleanProvider === 'grok') persistEnvVar('XAI_API_KEY', safeKey);
     } catch (e: any) {
-      console.warn('Could not persist key:', e.message);
+      console.warn('Could not persist key:', sanitizeErrorMessage(e));
     }
 
     res.json({ success: true, provider: cleanProvider, configured: !!safeKey });
@@ -292,7 +296,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
         connection
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -301,8 +305,11 @@ export function createAdminRouter(agentCore: AgentCore): Router {
     const { url, key } = req.body;
     if (!url || !key) return res.status(400).json({ error: 'url and key required' });
 
-    const cleanUrl = sanitizeString(url, 256);
-    const cleanKey = sanitizeString(key, 512);
+    const cleanUrl = sanitizeString(url, 256).replace(/[\r\n\0]/g, '').trim();
+    const cleanKey = sanitizeString(key, 512).replace(/[\r\n\0]/g, '').trim();
+    if (!cleanUrl.startsWith('https://') || !isSafeHttpUrl(cleanUrl)) {
+      return res.status(400).json({ error: 'Invalid Supabase URL. Must be a valid https:// endpoint.' });
+    }
 
     try {
       updateSupabaseCredentials(cleanUrl, cleanKey);
@@ -311,7 +318,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
       const connection = await testSupabaseConnection();
       res.json({ success: true, connection });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -345,7 +352,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
       const health = await agentCore.getProviderManager().getHealth();
       res.json(health);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -372,7 +379,7 @@ export function createAdminRouter(agentCore: AgentCore): Router {
         latencyMs: elapsed
       });
     } catch (err: any) {
-      res.json({ success: false, error: err.message });
+      res.json({ success: false, error: sanitizeErrorMessage(err) });
     }
   });
 

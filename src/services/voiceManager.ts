@@ -318,14 +318,6 @@ class VoicePlaybackManager {
    */
   private async prefetchSentenceAudio(text: string, voice: VoiceOption): Promise<string | null> {
     try {
-      const key = typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
-      if (key && key.startsWith('sk_')) {
-        const res = await synthesize(text, voice.id, 'elevenlabs', key);
-        if (res?.audioUrl) {
-          this.activeBlobUrls.push(res.audioUrl);
-          return res.audioUrl;
-        }
-      }
       const streamUrl = `/api/tts-stream?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice.id)}`;
       const res = await fetch(streamUrl, { signal: AbortSignal.timeout(3500) });
       if (res.ok) {
@@ -718,7 +710,7 @@ class VoicePlaybackManager {
     textToDisplay?: string
   ): Promise<void> {
     this.activeAbortController = new AbortController();
-    const key = apiKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');
+    const key = apiKey || '';
 
     // Fast-path: Valid ElevenLabs API keys always start with 'sk_'.
     // If key is missing or not a valid sk_ key, skip directly to ultra-fast Studio Neural Edge TTS.

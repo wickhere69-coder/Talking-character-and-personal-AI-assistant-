@@ -251,10 +251,12 @@ body {
 }
 
 /* ── Focus Ring ── */
-:focus-visible {
-  outline: 2px solid rgba(139, 124, 255, 0.6);
-  outline-offset: 2px;
-  border-radius: 9999px;
+@layer base {
+  :focus-visible {
+    outline: 2px solid rgba(139, 124, 255, 0.6);
+    outline-offset: 2px;
+    border-radius: 9999px;
+  }
 }
 
 /* ── Transition Defaults ── */
@@ -262,4 +264,28 @@ button, a {
   transition-property: color, background-color, border-color, box-shadow, transform, opacity;
   transition-duration: 150ms;
   transition-timing-function: ease;
+}
+
+/* ── Accessible Screen-Reader Helper & Native Top-Layer Dialog Containment ── */
+.visually-hidden {
+  position: absolute;
+  clip-path: inset(50%);
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgba(11, 13, 18, 0.72);
+  backdrop-filter: blur(8px);
 }

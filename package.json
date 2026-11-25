@@ -7,7 +7,7 @@
     "dev": "concurrently -n vite,ts_server,py_ai -c blue,cyan,green \"vite\" \"tsx watch server/index.ts\" \"npm run dev:python\"",
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
-    "dev:python": "python_backend\\.venv\\Scripts\\python.exe -m uvicorn main:app --app-dir python_backend --host 0.0.0.0 --port 8000 --reload",
+    "dev:python": "python_backend\\.venv\\Scripts\\python.exe -m uvicorn main:app --app-dir python_backend --host 127.0.0.1 --port 8000 --reload",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"

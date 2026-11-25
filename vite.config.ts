@@ -11,8 +11,14 @@ export default defineConfig({
     },
   },
   server: {
-    host: true,
+    host: 'localhost',
     port: 5173,
+    headers: {
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+    },
     fs: {
       deny: [
         '**/.env',
@@ -39,6 +45,10 @@ export default defineConfig({
       '^/ws': {
         target: 'ws://127.0.0.1:8000',
         ws: true,
+        changeOrigin: true,
+      },
+      '^/api/auth': {
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '^/api/agent': {

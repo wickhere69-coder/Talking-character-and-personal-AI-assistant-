@@ -3,9 +3,8 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useAppStore } from '@/store/appStore';
 import { auraController } from '@/services/auraConversationController';
 import { voiceManager } from '@/services/voiceManager';
+import ComposerBar from './ComposerBar';
 import {
-  Send,
-  Square,
   Sparkles,
   Brain,
   Pin,
@@ -22,8 +21,7 @@ import {
   ArchiveRestore,
   Lightbulb,
   Shirt,
-  BookOpen,
-  X
+  BookOpen
 } from 'lucide-react';
 
 interface SessionChatPanelProps {
@@ -46,7 +44,6 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
 
   const {
     agentStatus,
-    isSpeaking,
     playbackState,
     agentSpeed
   } = useAppStore();
@@ -60,27 +57,11 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
 
   const session = getActiveSession();
   const isBusy = agentStatus === 'thinking' || agentStatus === 'planning' || playbackState === 'loading';
-  const isCharacterSpeaking = isSpeaking || playbackState === 'playing' || agentStatus === 'speaking';
 
   // Auto-scroll to bottom of conversation
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeMessages.length, isBusy]);
-
-  const handleSend = () => {
-    const trimmed = inputVal.trim();
-    if (!trimmed) return;
-    voiceManager.getEngine().scheduler.ensureContext().catch(() => {});
-    setInputVal('');
-    auraController.ask(trimmed);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -90,8 +71,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
 
   const handleReadAloud = async (text: string) => {
     const voice = voiceManager.resolveCurrentVoice();
-    const key = typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
-    await voiceManager.speak(text, voice, key);
+    await voiceManager.speak(text, voice);
   };
 
   const handleSaveTitle = async () => {
@@ -387,11 +367,7 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
                 </div>
 
                 <div
-                  className={`relative max-w-[85%] rounded-[16px] px-4 py-3 text-[13px] md:text-[14px] leading-relaxed whitespace-pre-wrap ${
-                    isUser
-                      ? 'bg-[#1A1D27] border border-[#2A2E3B] text-[#F2F2F2]'
-                      : 'bg-[#232845] border border-[#8B7CFF] text-[#F2F2F2] shadow-[0_4px_20px_rgba(139,124,255,0.1)]'
-                  }`}
+                  className="relative max-w-[85%] rounded-[16px] px-4 py-3 text-[13px] md:text-[14px] leading-relaxed whitespace-pre-wrap bg-[#1A1D27] border border-[#2A2E3B] text-[#F2F2F2]"
                 >
                   <p>{msg.content}</p>
 
@@ -424,37 +400,14 @@ export default function SessionChatPanel({ onBackToSessions, showBackControl = f
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── 3. Bottom Composer Pill (Figma: Height 64px, Fill #1C1F2A, Border #2A2E3B, Radius 33px) ── */}
-      <div className="p-4 border-t border-[#23252F] bg-[#14161E]">
-        <div className="flex items-center gap-2 h-12 px-3.5 rounded-[33px] bg-[#1C1F2A] border border-[#2A2E3B] focus-within:border-[#8B7CFF] transition">
-          <input
-            type="text"
-            value={inputVal}
-            onChange={(e) => setInputVal(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isBusy ? "Thinking..." : "Message Aura…"}
-            className="flex-1 bg-transparent border-none outline-none text-xs md:text-sm text-[#F2F2F2] placeholder-[#7A7D86]"
-          />
-          {inputVal && (
-            <button
-              type="button"
-              onClick={() => setInputVal('')}
-              className="text-[#7A7D86] hover:text-[#FFFFFF] p-1 rounded-full transition cursor-pointer"
-              title="Clear"
-            >
-              <X size={13} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={!inputVal.trim()}
-            className="w-8 h-8 rounded-full bg-[#8B7CFF] hover:bg-[#9E91FF] disabled:opacity-40 text-white flex items-center justify-center transition active:scale-95 cursor-pointer disabled:cursor-not-allowed"
-            title="Send"
-          >
-            <Send size={13} />
-          </button>
-        </div>
+      {/* ── 3. Bottom Composer Pill (shared home searchbar component, zero inner box) ── */}
+      <div className="px-4 pb-4 pt-2 bg-transparent shrink-0">
+        <ComposerBar
+          value={inputVal}
+          onChange={setInputVal}
+          onSubmit={(trimmed) => auraController.ask(trimmed)}
+          inputPaddingClass="pl-3 pr-2"
+        />
       </div>
     </div>
   );

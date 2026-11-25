@@ -1,10 +1,12 @@
 import React from 'react';
 import { useAppStore } from '@/store/appStore';
+import { useAuthStore } from '@/store/authStore';
 import {
   Home,
   MessageSquare,
   Mic,
-  Shield
+  Shield,
+  LogOut
 } from 'lucide-react';
 import SessionSidebar from './SessionSidebar';
 
@@ -29,6 +31,7 @@ export default function AppSidebar({ onOpenTab }: AppSidebarProps) {
     agentStatus,
     isListening
   } = useAppStore();
+  const { user, logout } = useAuthStore();
 
   const isBusy = agentStatus === 'thinking' || agentStatus === 'planning' || playbackState === 'loading';
   const isCharacterSpeaking = isSpeaking || playbackState === 'playing' || agentStatus === 'speaking';
@@ -81,6 +84,15 @@ export default function AppSidebar({ onOpenTab }: AppSidebarProps) {
             title="Admin Console"
           >
             <Shield size={14} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="p-2 rounded-xl text-[#7A7D86] hover:text-rose-400 transition"
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <LogOut size={14} strokeWidth={1.75} />
           </button>
         </nav>
       </header>
@@ -169,7 +181,7 @@ export default function AppSidebar({ onOpenTab }: AppSidebarProps) {
               </div>
             </div>
 
-            <div className="hidden md:flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-1.5">
               <span className="text-[11px] text-[#7A7D86] font-mono">v2</span>
               <button
                 type="button"
@@ -178,6 +190,15 @@ export default function AppSidebar({ onOpenTab }: AppSidebarProps) {
                 title="Admin Console"
               >
                 <Shield size={12} strokeWidth={1.5} />
+              </button>
+              <button
+                type="button"
+                onClick={() => logout()}
+                className="p-1 rounded-lg text-[#7A7D86] hover:text-rose-400 transition cursor-pointer"
+                title={user ? `Sign out (${user.email})` : 'Sign out'}
+                aria-label="Sign out"
+              >
+                <LogOut size={12} strokeWidth={1.5} />
               </button>
             </div>
           </div>

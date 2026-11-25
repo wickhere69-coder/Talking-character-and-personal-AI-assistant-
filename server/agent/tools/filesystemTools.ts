@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { ToolRegistry } from './ToolRegistry';
 import { ToolResult } from '../types';
+import { sanitizeErrorMessage } from '../../utils/sanitizer';
 
 const BLOCKED_SENSITIVE_NAMES = new Set([
   '.env',
@@ -10,31 +11,82 @@ const BLOCKED_SENSITIVE_NAMES = new Set([
   '.env.development',
   '.git',
   '.gitignore',
+  '.venv',
+  'venv',
+  'node_modules',
+  'dist',
+  'data',
+  '__pycache__',
+  '.claude',
+  '.vscode',
   'id_rsa',
   'id_ed25519',
   'authorized_keys'
 ]);
 
-function resolveSafePath(userPath: string): string {
-  const root = path.resolve(process.cwd());
-  const clean = (userPath || '.').replace(/[\0\r\n]/g, '');
+const SENSITIVE_EXTS = new Set(['.db', '.sqlite', '.sqlite3', '.key', '.pem', '.cert', '.p12', '.pfx', '.env']);
+const PROTECTED_WRITE_FILES = new Set(['package.json', 'package-lock.json', 'vite.config.ts', 'vite.config.js', 'tsconfig.json', 'index.html', 'requirements.txt']);
+const PROTECTED_WRITE_DIRS = new Set(['python_backend', 'server', 'src', '.git', '.vscode', '.claude', 'data', 'dist', 'node_modules', '.venv', 'venv']);
+const PROTECTED_WRITE_EXTS = new Set(['.py', '.ts', '.tsx', '.js', '.jsx', '.bat', '.sh', '.ps1', '.exe', '.dll', '.cmd']);
+const MAX_READ_BYTES = 1_048_576;
+
+function isSkippedEntry(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (name.startsWith('.') || BLOCKED_SENSITIVE_NAMES.has(lower)) return true;
+  return SENSITIVE_EXTS.has(path.extname(lower));
+}
+
+function resolveRealAncestor(targetPath: string): string {
+  let cursor = targetPath;
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  const realBase = fs.existsSync(cursor) ? fs.realpathSync(cursor) : cursor;
+  return path.join(realBase, path.relative(cursor, targetPath));
+}
+
+function resolveSafePath(userPath: string, forWrite = false): string {
+  const root = fs.realpathSync(path.resolve(process.cwd()));
+  const clean = (userPath || '.').replace(/[\0\r\n]/g, '').trim() || '.';
 
   const resolved = path.isAbsolute(clean)
     ? path.resolve(clean)
     : path.resolve(root, clean);
 
-  // Sandboxing check: ensure path does not escape the project workspace root
-  if (!resolved.startsWith(root)) {
+  const realTarget = resolveRealAncestor(resolved);
+  const rel = path.relative(root, realTarget);
+
+  // Strict boundary check preventing sibling-prefix bypasses (e.g. app-evil/) and symlink escapes
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error('Access denied: Path is outside the authorized project workspace.');
   }
 
-  // File protection check: block access to environment files and sensitive credentials
-  const base = path.basename(resolved).toLowerCase();
-  if (BLOCKED_SENSITIVE_NAMES.has(base) || base.startsWith('.env')) {
+  const segments = rel ? rel.split(path.sep).filter(Boolean) : [];
+  for (const seg of segments) {
+    const lower = seg.toLowerCase();
+    if (BLOCKED_SENSITIVE_NAMES.has(lower) || lower.startsWith('.env')) {
+      throw new Error('Access denied: Access to environment variables and sensitive directories is restricted.');
+    }
+  }
+
+  const base = path.basename(realTarget).toLowerCase();
+  const ext = path.extname(base);
+  if (SENSITIVE_EXTS.has(ext) || base.startsWith('.env')) {
     throw new Error('Access denied: Access to environment variables and secret credentials is restricted.');
   }
 
-  return resolved;
+  if (forWrite) {
+    if (PROTECTED_WRITE_FILES.has(base) || PROTECTED_WRITE_EXTS.has(ext)) {
+      throw new Error('Access denied: Modifying critical configuration or executable files is restricted.');
+    }
+    if (segments.length > 0 && PROTECTED_WRITE_DIRS.has(segments[0].toLowerCase())) {
+      throw new Error('Access denied: Modifying source or runtime directories is restricted.');
+    }
+  }
+
+  return realTarget;
 }
 
 export function registerFilesystemTools(registry: ToolRegistry): void {
@@ -60,12 +112,12 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const targetDir = resolveSafePath(params.directory || '.');
-      if (!fs.existsSync(targetDir)) {
-        return { success: false, error: `Directory "${params.directory}" not found.`, message: 'Directory does not exist.' };
-      }
-
       try {
+        const targetDir = resolveSafePath(params.directory || '.', false);
+        if (!fs.existsSync(targetDir)) {
+          return { success: false, error: 'Directory not found.', message: 'Directory does not exist.' };
+        }
+
         const results: Array<{ name: string; type: 'file' | 'directory'; sizeBytes?: number }> = [];
 
         function scan(dir: string, depth = 0) {
@@ -73,7 +125,7 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
           const entries = fs.readdirSync(dir, { withFileTypes: true });
           for (const entry of entries) {
             if (results.length >= 60) break;
-            if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+            if (isSkippedEntry(entry.name)) continue;
 
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
@@ -99,7 +151,8 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
           message: `Found ${results.length} items in ${path.basename(targetDir)}:`
         };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Could not list files.' };
+        const msg = sanitizeErrorMessage(err, 'Could not list files.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );
@@ -125,44 +178,49 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const query = (params.query || '').toLowerCase();
-      const targetDir = resolveSafePath(params.directory || '.');
-      const matches: string[] = [];
+      try {
+        const query = (params.query || '').toLowerCase();
+        const targetDir = resolveSafePath(params.directory || '.', false);
+        const matches: string[] = [];
 
-      function findMatching(dir: string) {
-        if (matches.length >= 40) return;
-        try {
-          const entries = fs.readdirSync(dir, { withFileTypes: true });
-          for (const entry of entries) {
-            if (matches.length >= 40) break;
-            if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+        function findMatching(dir: string) {
+          if (matches.length >= 40) return;
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (matches.length >= 40) break;
+              if (isSkippedEntry(entry.name)) continue;
 
-            const full = path.join(dir, entry.name);
-            if (entry.name.toLowerCase().includes(query)) {
-              matches.push(path.relative(process.cwd(), full));
+              const full = path.join(dir, entry.name);
+              if (entry.name.toLowerCase().includes(query)) {
+                matches.push(path.relative(process.cwd(), full));
+              }
+              if (entry.isDirectory()) {
+                findMatching(full);
+              }
             }
-            if (entry.isDirectory()) {
-              findMatching(full);
-            }
-          }
-        } catch {}
-      }
+          } catch {}
+        }
 
-      findMatching(targetDir);
+        findMatching(targetDir);
 
-      if (matches.length === 0) {
+        if (matches.length === 0) {
+          return {
+            success: true,
+            data: `No files matching "${query}" found.`,
+            message: `No files found matching "${query}".`
+          };
+        }
+
         return {
           success: true,
-          data: `No files matching "${query}" found.`,
-          message: `No files found matching "${query}".`
+          data: matches.join('\n'),
+          message: `Found ${matches.length} matching file(s) for "${query}":`
         };
+      } catch (err: any) {
+        const msg = sanitizeErrorMessage(err, 'Failed to search files.');
+        return { success: false, error: msg, message: msg };
       }
-
-      return {
-        success: true,
-        data: matches.join('\n'),
-        message: `Found ${matches.length} matching file(s) for "${query}":`
-      };
     }
   );
 
@@ -187,15 +245,22 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const target = resolveSafePath(params.filePath);
-      if (!fs.existsSync(target)) {
-        return { success: false, error: `File not found: ${params.filePath}`, message: 'File does not exist.' };
-      }
-
       try {
+        const target = resolveSafePath(params.filePath, false);
+        if (!fs.existsSync(target)) {
+          return { success: false, error: 'File does not exist.', message: 'File does not exist.' };
+        }
+        const stat = fs.statSync(target);
+        if (!stat.isFile()) {
+          return { success: false, error: 'Target path is not a file.', message: 'Target is not a file.' };
+        }
+        if (stat.size > MAX_READ_BYTES) {
+          return { success: false, error: 'File exceeds maximum readable size (1 MB).', message: 'File too large to read.' };
+        }
+
         const content = fs.readFileSync(target, 'utf8');
         const lines = content.split('\n');
-        const max = params.maxLines || 80;
+        const max = Math.min(Math.max(1, Number(params.maxLines) || 80), 500);
         const truncated = lines.slice(0, max).join('\n');
         const note = lines.length > max ? `\n... (truncated ${lines.length - max} more lines)` : '';
 
@@ -205,7 +270,8 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
           message: `Read ${Math.min(lines.length, max)} lines from ${path.basename(target)}.`
         };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Failed to read file.' };
+        const msg = sanitizeErrorMessage(err, 'Failed to read file.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );
@@ -231,8 +297,8 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const target = resolveSafePath(params.filePath);
       try {
+        const target = resolveSafePath(params.filePath, true);
         const dir = path.dirname(target);
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
@@ -240,11 +306,12 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
         fs.writeFileSync(target, params.content || '', 'utf8');
         return {
           success: true,
-          data: { path: target, bytes: (params.content || '').length },
+          data: { path: path.relative(process.cwd(), target), bytes: (params.content || '').length },
           message: `Successfully created file ${path.basename(target)}.`
         };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Failed to create file.' };
+        const msg = sanitizeErrorMessage(err, 'Failed to create file.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );
@@ -275,8 +342,8 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const target = resolveSafePath(params.filePath);
       try {
+        const target = resolveSafePath(params.filePath, true);
         const dir = path.dirname(target);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -291,7 +358,8 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
           message: `Successfully updated ${path.basename(target)}.`
         };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Failed to write file.' };
+        const msg = sanitizeErrorMessage(err, 'Failed to write file.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );
@@ -308,17 +376,18 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const src = resolveSafePath(params.source);
-      const dst = resolveSafePath(params.destination);
-      if (!fs.existsSync(src)) return { success: false, error: 'Source file does not exist', message: 'Source not found.' };
-
       try {
+        const src = resolveSafePath(params.source, false);
+        const dst = resolveSafePath(params.destination, true);
+        if (!fs.existsSync(src)) return { success: false, error: 'Source file does not exist.', message: 'Source not found.' };
+
         const dstDir = path.dirname(dst);
         if (!fs.existsSync(dstDir)) fs.mkdirSync(dstDir, { recursive: true });
         fs.copyFileSync(src, dst);
         return { success: true, message: `Copied ${path.basename(src)} to ${path.basename(dst)}.` };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Failed to copy file.' };
+        const msg = sanitizeErrorMessage(err, 'Failed to copy file.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );
@@ -335,17 +404,18 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const src = resolveSafePath(params.source);
-      const dst = resolveSafePath(params.destination);
-      if (!fs.existsSync(src)) return { success: false, error: 'Source file does not exist', message: 'Source not found.' };
-
       try {
+        const src = resolveSafePath(params.source, true);
+        const dst = resolveSafePath(params.destination, true);
+        if (!fs.existsSync(src)) return { success: false, error: 'Source file does not exist.', message: 'Source not found.' };
+
         const dstDir = path.dirname(dst);
         if (!fs.existsSync(dstDir)) fs.mkdirSync(dstDir, { recursive: true });
         fs.renameSync(src, dst);
         return { success: true, message: `Moved ${path.basename(src)} to ${path.basename(dst)}.` };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Failed to move file.' };
+        const msg = sanitizeErrorMessage(err, 'Failed to move file.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );
@@ -361,29 +431,30 @@ export function registerFilesystemTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const target = resolveSafePath(params.filePath);
-      if (!fs.existsSync(target)) {
-        return { success: false, error: 'File does not exist', message: 'Target file not found.' };
-      }
-
-      // Safety check: protect project configuration files from accidental deletion
-      const fileName = path.basename(target).toLowerCase();
-      if (['package.json', 'vite.config.ts', 'tsconfig.json', '.env', 'index.html'].includes(fileName)) {
-        return {
-          success: false,
-          error: `Safety boundary: Protected critical project file ${fileName} cannot be deleted.`,
-          message: `Cannot delete critical file ${fileName}.`
-        };
-      }
-
       try {
+        const target = resolveSafePath(params.filePath, true);
+        if (!fs.existsSync(target)) {
+          return { success: false, error: 'File does not exist.', message: 'Target file not found.' };
+        }
+
+        // Safety check: protect project configuration files from accidental deletion
+        const fileName = path.basename(target).toLowerCase();
+        if (['package.json', 'vite.config.ts', 'tsconfig.json', '.env', 'index.html'].includes(fileName)) {
+          return {
+            success: false,
+            error: `Safety boundary: Protected critical project file ${fileName} cannot be deleted.`,
+            message: `Cannot delete critical file ${fileName}.`
+          };
+        }
+
         fs.unlinkSync(target);
         return {
           success: true,
           message: `Successfully deleted file ${path.basename(target)}.`
         };
       } catch (err: any) {
-        return { success: false, error: err.message, message: 'Failed to delete file.' };
+        const msg = sanitizeErrorMessage(err, 'Failed to delete file.');
+        return { success: false, error: msg, message: msg };
       }
     }
   );

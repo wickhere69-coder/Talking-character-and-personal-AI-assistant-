@@ -3,7 +3,6 @@ import { useSessionStore } from '@/store/sessionStore';
 import { ChatSession } from '@/types/session';
 import {
   Plus,
-  Search,
   Pin,
   Archive,
   Trash2,
@@ -23,8 +22,6 @@ interface SessionSidebarProps {
 export default function SessionSidebar({ onSessionSelect, compact = false }: SessionSidebarProps) {
   const {
     activeSessionId,
-    sessionSearchQuery,
-    setSessionSearchQuery,
     showArchived,
     setShowArchived,
     createNewSession,
@@ -259,37 +256,15 @@ export default function SessionSidebar({ onSessionSelect, compact = false }: Ses
 
   return (
     <div className={`flex flex-col h-full ${compact ? 'p-0' : 'p-2.5'} space-y-3 select-none font-sans`}>
-      {/* ── Figma Frame 1:2: "+ New Session" button (Rectangle 248x42 at #232733) ── */}
+      {/* ── New Session button (Rectangle 248x42 at #232733) ── */}
       <button
         type="button"
         onClick={handleCreateNew}
-        className="w-full h-[42px] px-4 rounded-[10px] bg-[#232733] hover:bg-[#2F3445] active:scale-[0.98] border border-[#2A2E3B] text-[#FFFFFF] font-semibold text-[14px] transition-all flex items-center justify-center gap-2 shadow-sm group"
+        className="w-full h-[42px] px-4 rounded-[10px] bg-[#232733] hover:bg-[#2F3445] active:scale-[0.98] border border-[#2A2E3B] text-[#FFFFFF] font-semibold text-[14px] transition-all flex items-center justify-center gap-2 shadow-sm group cursor-pointer"
       >
-        <Plus size={15} strokeWidth={2.5} className="text-white group-hover:rotate-90 transition-transform duration-200" />
-        <span className="tracking-tight">+ New Session</span>
+        <Plus size={15} strokeWidth={2.5} aria-hidden="true" className="text-white group-hover:rotate-90 transition-transform duration-200" />
+        <span className="tracking-tight">New Session</span>
       </button>
-
-      {/* ── Search Chats Input with Instant Clear ── */}
-      <div className="relative w-full">
-        <Search size={14} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7A7D86]" />
-        <input
-          type="text"
-          value={sessionSearchQuery}
-          onChange={(e) => setSessionSearchQuery(e.target.value)}
-          placeholder="Search chats..."
-          className="w-full h-8 pl-8 pr-7 bg-[#1A1D27] border border-[#2A2E3B] focus:border-[#8B7CFF]/60 rounded-[8px] text-[12px] text-[#F2F2F2] placeholder-[#7A7D86] outline-none transition font-sans"
-        />
-        {sessionSearchQuery && (
-          <button
-            type="button"
-            onClick={() => setSessionSearchQuery('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[#7A7D86] hover:text-white p-0.5 rounded transition cursor-pointer"
-            title="Clear search"
-          >
-            <X size={12} />
-          </button>
-        )}
-      </div>
 
       {/* ── Scrollable Grouped Session List ── */}
       <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2.5 pr-0.5">

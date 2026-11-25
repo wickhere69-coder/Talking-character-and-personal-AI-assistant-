@@ -4,12 +4,16 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Any, Dict, List
+from urllib.parse import urljoin
 
 import httpx
 
 from utils.logger import get_logger
+from utils.security import sanitize_error_message, validate_public_http_url
 
 logger = get_logger(__name__)
+_MAX_WEBPAGE_BYTES = 524_288  # 512 KB cap to prevent OOM on large responses
+_MAX_REDIRECTS = 3
 
 _HEADERS = {
     "User-Agent": (
@@ -57,12 +61,11 @@ async def web_search(query: str) -> Dict[str, Any]:
         # 1. Google News RSS for current events
         if is_news and len(snippets) < 4:
             try:
-                news_url = (
-                    "https://news.google.com/rss/search?q="
-                    + httpx.URL(query).__str__().replace(query, "")
+                r = await client.get(
+                    "https://news.google.com/rss/search",
+                    params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                    timeout=3.0,
                 )
-                news_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
-                r = await client.get(news_url, timeout=3.0)
                 if r.status_code == 200:
                     xml = r.text
                     item_pattern = re.compile(
@@ -81,8 +84,11 @@ async def web_search(query: str) -> Dict[str, Any]:
         # 2. DuckDuckGo HTML search
         if len(snippets) < 3:
             try:
-                ddg_url = f"https://html.duckduckgo.com/html/?q={query}"
-                r = await client.get(ddg_url, timeout=3.0)
+                r = await client.get(
+                    "https://html.duckduckgo.com/html/",
+                    params={"q": query},
+                    timeout=3.0,
+                )
                 if r.status_code == 200:
                     html = r.text
                     for m in re.finditer(r'class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>', html):
@@ -98,7 +104,9 @@ async def web_search(query: str) -> Dict[str, Any]:
         if len(snippets) < 2:
             try:
                 r = await client.get(
-                    f"https://api.duckduckgo.com/?q={query}&format=json", timeout=2.5
+                    "https://api.duckduckgo.com/",
+                    params={"q": query, "format": "json"},
+                    timeout=2.5,
                 )
                 if r.status_code == 200:
                     data = r.json()
@@ -143,14 +151,35 @@ async def web_search(query: str) -> Dict[str, Any]:
 
 
 async def fetch_webpage(url: str) -> Dict[str, Any]:
-    """Fetch and clean text from a public web URL."""
-    if not (url.startswith("http://") or url.startswith("https://")):
-        return {"success": False, "error": "Invalid URL", "message": "URL must start with http:// or https://"}
+    """Fetch and clean text from a validated public web URL (with SSRF protection)."""
+    try:
+        current_url = await asyncio.to_thread(validate_public_http_url, url)
+    except ValueError as val_err:
+        return {"success": False, "error": "Restricted URL", "message": str(val_err)}
 
     try:
-        async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True, timeout=6.0) as client:
-            r = await client.get(url)
-            raw = r.text if isinstance(r.text, str) else str(r.content)
+        async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=False, timeout=6.0) as client:
+            resp = None
+            for _ in range(_MAX_REDIRECTS + 1):
+                async with client.stream("GET", current_url) as r:
+                    if r.is_redirect and "location" in r.headers:
+                        next_url = urljoin(current_url, r.headers["location"])
+                        current_url = await asyncio.to_thread(validate_public_http_url, next_url)
+                        continue
+
+                    chunks: List[bytes] = []
+                    total = 0
+                    async for chunk in r.aiter_bytes():
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if total >= _MAX_WEBPAGE_BYTES:
+                            break
+                    raw = b"".join(chunks).decode("utf-8", errors="replace")
+                    resp = r
+                    break
+
+            if resp is None:
+                return {"success": False, "error": "Too many redirects", "message": "Too many redirects while fetching webpage."}
 
             # Strip scripts and styles
             raw = re.sub(r"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", "", raw, flags=re.IGNORECASE)
@@ -162,9 +191,12 @@ async def fetch_webpage(url: str) -> Dict[str, Any]:
             return {
                 "success": True,
                 "data": preview,
-                "message": f"Fetched webpage content from {url}:\n{preview}...",
+                "message": f"Fetched webpage content from {current_url}:\n{preview}...",
             }
     except asyncio.CancelledError:
         raise
+    except ValueError as val_err:
+        return {"success": False, "error": "Restricted redirect", "message": str(val_err)}
     except Exception as exc:
-        return {"success": False, "error": str(exc), "message": f"Could not fetch webpage: {exc}"}
+        safe_msg = sanitize_error_message(exc, "Failed to fetch webpage.")
+        return {"success": False, "error": safe_msg, "message": f"Could not fetch webpage: {safe_msg}"}

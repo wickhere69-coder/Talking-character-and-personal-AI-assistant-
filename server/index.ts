@@ -9,7 +9,7 @@ import { createAgentRouter } from './agent/routes';
 import { createAdminRouter } from './routes/adminRoutes';
 import { persistEnvVar } from './utils/envUtils';
 import { AgentCore } from './agent/AgentCore';
-import { sanitizeString } from './utils/sanitizer';
+import { sanitizeString, isAllowedOrigin, sanitizeErrorMessage } from './utils/sanitizer';
 import { adminAuthMiddleware } from './routes/adminRoutes';
 
 dotenv.config();
@@ -23,8 +23,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", "https://accounts.google.com/gsi/client"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://accounts.google.com/gsi/style"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
       connectSrc: [
@@ -33,8 +33,10 @@ app.use(helmet({
         "http://127.0.0.1:*",
         "https://generativelanguage.googleapis.com",
         "https://api.elevenlabs.io",
-        "https://*.supabase.co"
+        "https://*.supabase.co",
+        "https://accounts.google.com/gsi/"
       ],
+      frameSrc: ["'self'", "https://accounts.google.com/gsi/"],
       mediaSrc: ["'self'", "blob:", "data:"],
       workerSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
@@ -42,6 +44,7 @@ app.use(helmet({
     }
   },
   crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   crossOriginResourcePolicy: { policy: "cross-origin" },
   hidePoweredBy: true,
   noSniff: true,
@@ -56,16 +59,12 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,ht
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow non-browser requests (e.g. server-to-server, curl)
+    // Allow non-browser requests (e.g. same-host curl/server-to-server)
     if (!origin) return callback(null, true);
-    if (
-      allowedOrigins.includes(origin) ||
-      origin.startsWith('http://localhost:') ||
-      origin.startsWith('http://127.0.0.1:')
-    ) {
+    if (isAllowedOrigin(origin, allowedOrigins)) {
       return callback(null, true);
     }
-    return callback(new Error(`CORS violation: Origin "${origin}" is not authorized.`));
+    return callback(new Error('CORS violation: Origin is not authorized.'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-secret', 'x-admin-token'],
@@ -295,6 +294,14 @@ app.get('/api/tts-stream', async (req, res) => {
   }
 });
 
+function cacheAudioEntry(cacheKey: string, audioBuf: Buffer) {
+  if (ttsAudioCache.size >= MAX_CACHE_ENTRIES) {
+    const firstKey = ttsAudioCache.keys().next().value;
+    if (firstKey) ttsAudioCache.delete(firstKey);
+  }
+  ttsAudioCache.set(cacheKey, audioBuf);
+}
+
 app.post('/api/synthesize', async (req, res) => {
   const rawText = sanitizeString(req.body.text, 1000);
   const voice = sanitizeString(req.body.voice, 64);
@@ -312,18 +319,14 @@ app.post('/api/synthesize', async (req, res) => {
   try {
     const audioBuf = await synthesizeNeuralAudio(rawText, requestedVoice);
     if (audioBuf) {
-      if (ttsAudioCache.size >= MAX_CACHE_ENTRIES) {
-        const firstKey = ttsAudioCache.keys().next().value;
-        if (firstKey) ttsAudioCache.delete(firstKey);
-      }
-      ttsAudioCache.set(cacheKey, audioBuf);
+      cacheAudioEntry(cacheKey, audioBuf);
       return res.json({ audioBase64: audioBuf.toString('base64'), visemes: [] });
     }
     throw new Error('Synthesis failed');
   } catch (error: any) {
-    console.warn('Neural synthesis notice:', error.message);
+    console.warn('Neural synthesis notice:', sanitizeErrorMessage(error));
     if (!res.headersSent) {
-      res.status(500).json({ error: error.message || 'Synthesis failed' });
+      res.status(500).json({ error: sanitizeErrorMessage(error, 'Synthesis failed') });
     }
   }
 });
@@ -331,7 +334,8 @@ app.post('/api/synthesize', async (req, res) => {
 // Instant Barge-In Chirp Endpoint (< 5ms response from cache)
 app.get('/api/chirp', async (req, res) => {
   const rawText = sanitizeString(req.query.text as string || '', 128) || 'Oh, go ahead!';
-  const rawVoice = sanitizeString(req.query.voice as string || '', 64) || 'pFZP5JQG7iQjIQuC4Bku';
+  const requestedVoice = sanitizeString(req.query.voice as string || '', 64);
+  const rawVoice = /^[a-zA-Z0-9_-]{1,64}$/.test(requestedVoice) ? requestedVoice : 'pFZP5JQG7iQjIQuC4Bku';
   const cacheKey = `chirp:${rawVoice}:${rawText}`;
   const cached = ttsAudioCache.get(cacheKey) || ttsAudioCache.get(`${rawVoice}:${rawText}`);
   if (cached) {
@@ -344,14 +348,14 @@ app.get('/api/chirp', async (req, res) => {
   try {
     const audioBuf = await synthesizeNeuralAudio(rawText, rawVoice);
     if (audioBuf) {
-      ttsAudioCache.set(cacheKey, audioBuf);
+      cacheAudioEntry(cacheKey, audioBuf);
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Content-Length', audioBuf.length);
       res.setHeader('Cache-Control', 'public, max-age=86400');
       return res.end(audioBuf);
     }
   } catch (err: any) {
-    console.warn('[CHIRP] Synthesis error:', err?.message || err);
+    console.warn('[CHIRP] Synthesis error:', sanitizeErrorMessage(err));
   }
 
   if (!res.writableEnded) {
@@ -360,7 +364,7 @@ app.get('/api/chirp', async (req, res) => {
 });
 
 app.post('/api/elevenlabs', async (req, res) => {
-  const apiKey = (req.headers['xi-api-key'] as string) || req.body.apiKey || ELEVENLABS_KEY;
+  const apiKey = (req.headers['xi-api-key'] as string) || req.body.apiKey || ELEVENLABS_KEY || process.env.ELEVENLABS_API_KEY || '';
   if (!apiKey) {
     return res.status(400).json({ error: 'ElevenLabs API key required. Configure your secret API key in the Admin Panel.' });
   }
@@ -379,11 +383,17 @@ app.post('/api/elevenlabs', async (req, res) => {
   if (!text || !voiceId) {
     return res.status(400).json({ error: 'Text and voiceId are required' });
   }
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(voiceId)) {
+    return res.status(400).json({ error: 'Invalid voiceId format.' });
+  }
+  const selectedModel = modelId || 'eleven_turbo_v2_5';
+  if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(selectedModel)) {
+    return res.status(400).json({ error: 'Invalid modelId format.' });
+  }
 
   try {
-    const selectedModel = modelId || 'eleven_turbo_v2_5';
     const response = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps?optimize_streaming_latency=4`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?optimize_streaming_latency=4`,
       {
         text,
         model_id: selectedModel
@@ -399,11 +409,7 @@ app.post('/api/elevenlabs', async (req, res) => {
     );
     res.json(response.data);
   } catch (error: any) {
-    const detail = error.response?.data?.detail;
-    const msg = typeof detail === 'string'
-      ? detail
-      : detail?.message || error.response?.data?.message || 'ElevenLabs synthesis failed';
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeErrorMessage(error, 'ElevenLabs synthesis failed') });
   }
 });
 
@@ -489,7 +495,8 @@ async function prewarmAudioCache() {
   console.log('[AUDIO CACHE] Pre-warmed audio cache initialized successfully.');
 }
 
-app.listen(PORT, () => {
-  console.log(`TTS proxy server running securely on http://localhost:${PORT} [NODE_ENV=${process.env.NODE_ENV || 'production'}]`);
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(Number(PORT), HOST, () => {
+  console.log(`TTS proxy server running securely on http://${HOST}:${PORT} [NODE_ENV=${process.env.NODE_ENV || 'production'}]`);
   prewarmAudioCache().catch(() => {});
 });

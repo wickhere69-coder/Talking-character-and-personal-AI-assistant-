@@ -1285,8 +1285,7 @@ class AuraConversationController {
         this.store.setAgentStatus('idle');
       });
       const voice = voiceManager.resolveCurrentVoice();
-      const key = typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
-      voiceManager.speak(farewell, voice, key);
+      voiceManager.speak(farewell, voice);
     } else {
       if (this.liveConversation) this.stopListening();
       this.setState('sleeping');

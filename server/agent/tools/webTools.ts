@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { ToolRegistry } from './ToolRegistry';
 import { ToolResult } from '../types';
+import { assertSafePublicHttpUrl, sanitizeErrorMessage } from '../../utils/sanitizer';
 
 export function registerWebTools(registry: ToolRegistry): void {
   // Helper to decode HTML entities
@@ -39,14 +40,15 @@ export function registerWebTools(registry: ToolRegistry): void {
       try {
         const snippets: string[] = [];
 
-        // 1. Primary for news & current affairs: Google News RSS (real-time 2026 reporting in ~500ms)
+        // 1. Primary for news & current affairs: Google News RSS
         const isNews = /\b(news|today|latest|current|recent|election|war|game|super bowl|score|winner|championship|president|minister|stock|price|what happened|who won)\b/i.test(query);
         if (isNews) {
           try {
-            const newsUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(query) + '&hl=en-US&gl=US&ceid=US:en';
-            const newsRes = await axios.get(newsUrl, {
+            const newsRes = await axios.get('https://news.google.com/rss/search', {
+              params: { q: query, hl: 'en-US', gl: 'US', ceid: 'US:en' },
               headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-              timeout: 3000
+              timeout: 3000,
+              maxContentLength: 524288
             });
             const xml = newsRes.data || '';
             const itemRegex = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g;
@@ -70,6 +72,7 @@ export function registerWebTools(registry: ToolRegistry): void {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
               },
+              redirect: 'manual',
               signal: AbortSignal.timeout(3000)
             });
             if (ddgRes.ok) {
@@ -89,8 +92,10 @@ export function registerWebTools(registry: ToolRegistry): void {
         // 3. DuckDuckGo Instant Answer API
         if (snippets.length < 2) {
           try {
-            const apiRes = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`, {
-              timeout: 2500
+            const apiRes = await axios.get('https://api.duckduckgo.com/', {
+              params: { q: query, format: 'json' },
+              timeout: 2500,
+              maxContentLength: 262144
             });
             if (apiRes.data?.AbstractText) {
               snippets.push(apiRes.data.AbstractText);
@@ -101,10 +106,11 @@ export function registerWebTools(registry: ToolRegistry): void {
         // 4. Secondary fallback: Wikipedia API
         if (snippets.length === 0) {
           try {
-            const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
+            const wikiRes = await axios.get('https://en.wikipedia.org/w/api.php', {
               headers: { 'User-Agent': 'StudioPersonalAssistant/1.0 (personal.agent@local)' },
               params: { action: 'query', list: 'search', srsearch: query, format: 'json', utf8: 1, srlimit: 3 },
-              timeout: 2500
+              timeout: 2500,
+              maxContentLength: 262144
             });
             const items = wikiRes.data?.query?.search || [];
             if (items.length > 0) {
@@ -129,8 +135,8 @@ export function registerWebTools(registry: ToolRegistry): void {
       } catch (err: any) {
         return {
           success: false,
-          error: err.message,
-          message: `Web search temporarily unavailable: ${err.message}`
+          error: sanitizeErrorMessage(err, 'Web search failed.'),
+          message: 'Web search temporarily unavailable.'
         };
       }
     }
@@ -147,21 +153,38 @@ export function registerWebTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const url = params.url || '';
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        return { success: false, error: 'Invalid URL', message: 'URL must start with http:// or https://' };
-      }
-
       try {
-        const res = await axios.get(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AI-Personal-Assistant/1.0'
-          },
-          timeout: 6000
-        });
+        let currentUrl = await assertSafePublicHttpUrl(params.url || '');
+        const maxRedirects = 3;
+        let res: any = null;
+
+        for (let hop = 0; hop <= maxRedirects; hop++) {
+          res = await axios.get(currentUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AI-Personal-Assistant/1.0'
+            },
+            timeout: 6000,
+            maxRedirects: 0,
+            maxContentLength: 524288,
+            maxBodyLength: 524288,
+            responseType: 'text',
+            validateStatus: (status) => status >= 200 && status < 400
+          });
+
+          if (res.status >= 300 && res.status < 400) {
+            const location = res.headers?.location;
+            if (!location || hop === maxRedirects) {
+              return { success: false, error: 'Too many redirects.', message: 'Too many redirects.' };
+            }
+            const resolvedNext = new URL(location, currentUrl).toString();
+            currentUrl = await assertSafePublicHttpUrl(resolvedNext);
+            continue;
+          }
+          break;
+        }
 
         // Strip html tags, scripts, and styles
-        let clean = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        let clean = typeof res?.data === 'string' ? res.data : JSON.stringify(res?.data ?? '');
         clean = clean.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
         clean = clean.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
         clean = clean.replace(/<[^>]+>/g, ' ');
@@ -171,10 +194,11 @@ export function registerWebTools(registry: ToolRegistry): void {
         return {
           success: true,
           data: preview,
-          message: `Fetched webpage content from ${url}:\n${preview}...`
+          message: `Fetched webpage content from ${currentUrl}:\n${preview}...`
         };
       } catch (err: any) {
-        return { success: false, error: err.message, message: `Could not fetch webpage: ${err.message}` };
+        const safeMsg = sanitizeErrorMessage(err, 'Could not fetch webpage.');
+        return { success: false, error: safeMsg, message: safeMsg };
       }
     }
   );

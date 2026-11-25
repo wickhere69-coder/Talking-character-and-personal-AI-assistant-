@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { sanitizeString } from '../utils/sanitizer';
-import { verifyAdminToken, timingSafeCompare } from '../utils/authUtils';
+import { sanitizeString, isValidIdentifier, isSafeHttpUrl, sanitizeErrorMessage } from '../utils/sanitizer';
+import { adminAuthMiddleware } from '../routes/adminRoutes';
 import { AgentCore } from './AgentCore';
 import { persistEnvVar } from '../utils/envUtils';
 import { 
@@ -20,6 +20,9 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Field "message" is required and must be a string.' });
     }
+    if (sessionId !== undefined && sessionId !== null && !isValidIdentifier(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId format.' });
+    }
     const safeMessage = sanitizeString(message, 4000);
     const safeSessionId = sessionId ? sanitizeString(sessionId, 128) : undefined;
 
@@ -27,11 +30,12 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
       const response = await agent.handleUserMessage(safeMessage, config || {}, safeSessionId);
       res.json(response);
     } catch (err: any) {
-      console.error('Agent chat error:', err);
+      console.error('Agent chat error:', sanitizeErrorMessage(err));
+      const safeErr = sanitizeErrorMessage(err);
       res.status(500).json({
-        response: `I ran into an unexpected error: ${err.message}`,
+        response: `I ran into an unexpected error: ${safeErr}`,
         status: 'error',
-        error: err.message,
+        error: safeErr,
         modelUsed: 'error_handler'
       });
     }
@@ -42,6 +46,9 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
     const { message, config, sessionId } = req.body;
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Field "message" is required and must be a string.' });
+    }
+    if (sessionId !== undefined && sessionId !== null && !isValidIdentifier(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId format.' });
     }
     const safeStreamMsg = sanitizeString(message, 4000);
     const safeStreamSessionId = sessionId ? sanitizeString(sessionId, 128) : undefined;
@@ -78,9 +85,9 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
         res.end();
       }
     } catch (err: any) {
-      console.error('Agent stream error:', err);
+      console.error('Agent stream error:', sanitizeErrorMessage(err));
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ error: err.message || 'Stream processing failed' })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: sanitizeErrorMessage(err, 'Stream processing failed') })}\n\n`);
         res.end();
       }
     }
@@ -92,11 +99,11 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
   router.get('/sessions', (req, res) => {
     try {
       const includeArchived = req.query.includeArchived === 'true';
-      const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+      const search = typeof req.query.search === 'string' ? sanitizeString(req.query.search, 128) : undefined;
       const sessions = agent.getSessionManager().listSessions({ includeArchived, search });
       res.json({ sessions });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -104,96 +111,119 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
   router.post('/sessions', (req, res) => {
     try {
       const { title, topic } = req.body || {};
-      const session = agent.getSessionManager().createSession(title, topic);
+      const safeTitle = title ? sanitizeString(title, 120) : undefined;
+      const safeTopic = topic ? sanitizeString(topic, 120) : undefined;
+      const session = agent.getSessionManager().createSession(safeTitle, safeTopic);
       res.status(201).json({ session });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Search sessions & messages
   router.get('/sessions/search', (req, res) => {
     try {
-      const query = String(req.query.q || '');
+      const query = sanitizeString(String(req.query.q || ''), 128);
       const results = agent.getSessionManager().search(query);
       res.json({ results });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Get specific session + messages
   router.get('/sessions/:id', (req, res) => {
+    if (!isValidIdentifier(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid session ID.' });
+    }
     try {
       const data = agent.getSessionManager().getSession(req.params.id);
       if (!data) {
-        return res.status(404).json({ error: `Session "${req.params.id}" not found.` });
+        return res.status(404).json({ error: 'Session not found.' });
       }
       res.json(data);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Update session (title, topic, pinned, archived)
   router.patch('/sessions/:id', (req, res) => {
+    if (!isValidIdentifier(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid session ID.' });
+    }
     try {
       const updated = agent.getSessionManager().updateSession(req.params.id, req.body || {});
       if (!updated) {
-        return res.status(404).json({ error: `Session "${req.params.id}" not found.` });
+        return res.status(404).json({ error: 'Session not found.' });
       }
       res.json({ session: updated });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Delete session + messages
   router.delete('/sessions/:id', (req, res) => {
+    if (!isValidIdentifier(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid session ID.' });
+    }
     try {
       const deleted = agent.getSessionManager().deleteSession(req.params.id);
       if (!deleted) {
-        return res.status(404).json({ error: `Session "${req.params.id}" not found.` });
+        return res.status(404).json({ error: 'Session not found.' });
       }
       res.json({ success: true, id: req.params.id });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Get session messages
   router.get('/sessions/:id/messages', (req, res) => {
+    if (!isValidIdentifier(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid session ID.' });
+    }
     try {
-      const limit = req.query.limit ? Number(req.query.limit) : undefined;
-      const messages = agent.getSessionManager().getMessages(req.params.id, limit);
+      const parsedLimit = req.query.limit ? Math.min(Math.max(1, Number(req.query.limit) || 50), 500) : undefined;
+      const messages = agent.getSessionManager().getMessages(req.params.id, parsedLimit);
       res.json({ messages });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Add message to session
   router.post('/sessions/:id/messages', (req, res) => {
+    if (!isValidIdentifier(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid session ID.' });
+    }
     try {
       const { role, content, extra } = req.body || {};
-      if (!role || !content) {
+      if (!role || typeof content !== 'string' || !content.trim()) {
         return res.status(400).json({ error: 'role and content are required.' });
       }
-      const message = agent.getSessionManager().addMessage(req.params.id, role, content, extra || {});
+      if (!['user', 'assistant', 'system'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid message role.' });
+      }
+      const message = agent.getSessionManager().addMessage(req.params.id, role, sanitizeString(content, 16000), extra || {});
       res.status(201).json({ message });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
   // Trigger manual / forced summarization of session
   router.post('/sessions/:id/summarize', async (req, res) => {
+    if (!isValidIdentifier(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid session ID.' });
+    }
     try {
       await agent.triggerBackgroundSummarization(req.params.id);
       const data = agent.getSessionManager().getSession(req.params.id);
       res.json({ success: true, session: data?.session });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -205,10 +235,10 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
     }
 
     try {
-      const response = await agent.resolveConfirmation(confirmationId, approved);
+      const response = await agent.resolveConfirmation(sanitizeString(confirmationId, 128), approved);
       res.json(response);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
@@ -239,15 +269,20 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
 
   router.post('/memory', (req, res) => {
     const { key, value, category } = req.body;
-    if (!key || !value) {
-      return res.status(400).json({ error: 'key and value are required.' });
+    if (!key || typeof key !== 'string' || key.length > 128 || /[\0\r\n]/.test(key) || typeof value !== 'string' || !value.trim()) {
+      return res.status(400).json({ error: 'Valid key and value are required.' });
     }
-    const memory = agent.getMemoryStore().set(key, value, category);
+    const safeCategory = category ? sanitizeString(category, 64) : undefined;
+    const memory = agent.getMemoryStore().set(key.trim(), sanitizeString(value, 8000), safeCategory);
     res.json(memory);
   });
 
   router.delete('/memory/:key', (req, res) => {
-    const deleted = agent.getMemoryStore().delete(req.params.key);
+    const key = req.params.key || '';
+    if (!key || key.length > 128 || /[\0\r\n]/.test(key)) {
+      return res.status(400).json({ error: 'Invalid memory key.' });
+    }
+    const deleted = agent.getMemoryStore().delete(key);
     res.json({ success: deleted });
   });
 
@@ -274,14 +309,14 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
     });
   });
 
-  // 8. Key Configuration (Grok, Gemini, ElevenLabs)
-  router.post('/save-key', (req, res) => {
+  // 8. Key Configuration (Grok, Gemini, ElevenLabs) — Admin-protected
+  router.post('/save-key', adminAuthMiddleware, (req, res) => {
     const { provider, apiKey } = req.body;
     if (!provider || typeof apiKey !== 'string') {
       return res.status(400).json({ error: 'provider and apiKey (string) are required.' });
     }
 
-    const trimmedKey = apiKey.trim();
+    const trimmedKey = apiKey.replace(/[\r\n\0]/g, '').trim();
     const envVarName = (provider === 'grok' || provider === 'xai')
       ? 'GROK_API_KEY'
       : provider === 'gemini'
@@ -293,7 +328,7 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
       : null;
 
     if (!envVarName) {
-      return res.status(400).json({ error: `Unsupported provider "${provider}". Supported: grok, gemini, elevenlabs.` });
+      return res.status(400).json({ error: 'Unsupported provider. Supported: grok, gemini, elevenlabs.' });
     }
 
     process.env[envVarName] = trimmedKey;
@@ -306,17 +341,16 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
     agent.getProviderManager().setProviderKey(provider === 'xai' ? 'grok' : provider, trimmedKey);
 
     // Persist to .env file
-    const safeKey = trimmedKey.replace(/[\r\n]/g, '');
     try {
-      persistEnvVar(envVarName, safeKey);
+      persistEnvVar(envVarName, trimmedKey);
       if (envVarName === 'GROK_API_KEY') {
-        persistEnvVar('XAI_API_KEY', safeKey);
-        if (safeKey.startsWith('gsk_')) {
-          persistEnvVar('GROQ_API_KEY', safeKey);
+        persistEnvVar('XAI_API_KEY', trimmedKey);
+        if (trimmedKey.startsWith('gsk_')) {
+          persistEnvVar('GROQ_API_KEY', trimmedKey);
         }
       }
     } catch (e: any) {
-      console.warn(`Could not persist ${envVarName} to .env:`, e.message);
+      console.warn(`Could not persist ${envVarName} to .env:`, sanitizeErrorMessage(e));
     }
 
     res.json({ success: true, provider, configured: !!trimmedKey });
@@ -344,18 +378,21 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
         connection
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
-  router.post('/supabase/config', async (req, res) => {
+  router.post('/supabase/config', adminAuthMiddleware, async (req, res) => {
     const { url, key } = req.body;
-    if (!url || !key) {
+    if (!url || !key || typeof url !== 'string' || typeof key !== 'string') {
       return res.status(400).json({ error: 'Both "url" and "key" are required to connect Supabase.' });
     }
 
-    const cleanUrl = url.trim();
-    const cleanKey = key.trim();
+    const cleanUrl = sanitizeString(url, 256).replace(/[\r\n\0]/g, '').trim();
+    const cleanKey = sanitizeString(key, 512).replace(/[\r\n\0]/g, '').trim();
+    if (!cleanUrl.startsWith('https://') || !isSafeHttpUrl(cleanUrl)) {
+      return res.status(400).json({ error: 'Invalid Supabase URL. Must be a valid https:// endpoint.' });
+    }
 
     try {
       updateSupabaseCredentials(cleanUrl, cleanKey);
@@ -375,11 +412,11 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
         sync: syncResult
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 
-  router.post('/supabase/sync', async (req, res) => {
+  router.post('/supabase/sync', adminAuthMiddleware, async (req, res) => {
     try {
       const { direction } = req.body;
       const memoryStore = agent.getMemoryStore();
@@ -400,7 +437,7 @@ export function createAgentRouter(sharedAgent?: AgentCore): Router {
         push: pushResult
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err) });
     }
   });
 

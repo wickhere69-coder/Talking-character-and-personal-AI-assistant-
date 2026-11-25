@@ -9,7 +9,7 @@
  * - Surface: #1A1D27
  * - Border: #23252F / #2A2E3B
  * - Accent violet: #8B7CFF (Active item fill: #2A2350)
- * - AI message bubble: #232845 with #8B7CFF border
+ * - AI message bubble: #1A1D27 with #2A2E3B border (matching sent message style)
  * - Ready green: #34D399
  * - Text Primary: #F2F2F2 / #FFFFFF
  * - Text Secondary: #C9CBD3
@@ -36,7 +36,7 @@ export const COLORS = {
   accentHover: '#9E91FF',
   accentActive: '#7868F5',
   activeBg: '#2A2350',
-  aiBubble: '#232845',
+  aiBubble: '#1A1D27',
   userBubble: '#1A1D27',
   ready: '#34D399',
   success: '#34D399',
@@ -119,9 +119,9 @@ export const SURFACES = {
   cardSelected:
     'bg-[#2A2350] border-[#8B7CFF] text-[#FFFFFF] rounded-[16px] ring-1 ring-[#8B7CFF] transition-all duration-150 ease-out cursor-pointer shadow-sm',
 
-  // AI Message Capsule (Figma: #232845, border #8B7CFF, radius 16px)
+  // AI Message Capsule (matching sent message style: #1A1D27, border #2A2E3B, radius 16px)
   aiMessage:
-    'bg-[#232845] border border-[#8B7CFF] text-[#F2F2F2] rounded-[16px] p-4 shadow-sm',
+    'bg-[#1A1D27] border border-[#2A2E3B] text-[#F2F2F2] rounded-[16px] p-3.5 shadow-sm',
 
   // User Message Capsule (Figma: #1A1D27, border #2A2E3B, radius 16px)
   userMessage:

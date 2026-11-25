@@ -1,7 +1,32 @@
 import os from 'os';
-import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { execFile } from 'child_process';
 import { ToolRegistry } from './ToolRegistry';
 import { ToolResult } from '../types';
+import { assertSafePublicHttpUrl, sanitizeErrorMessage } from '../../utils/sanitizer';
+
+function resolveWorkspaceDir(rawPath?: string): string {
+  const workspaceRoot = fs.realpathSync(process.cwd());
+  const requested = (rawPath && rawPath.trim()) || '.';
+  const candidate = path.resolve(workspaceRoot, requested);
+  if (!fs.existsSync(candidate)) {
+    throw new Error('Target directory does not exist.');
+  }
+  const realTarget = fs.realpathSync(candidate);
+  const rel = path.relative(workspaceRoot, realTarget);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error('Access denied: Path escapes project workspace.');
+  }
+  const firstSegment = rel.split(/[\\/]/)[0]?.toLowerCase();
+  if (firstSegment && ['.git', '.venv', 'venv', 'data'].includes(firstSegment)) {
+    throw new Error('Access denied: Protected system directory.');
+  }
+  if (!fs.statSync(realTarget).isDirectory()) {
+    throw new Error('Target path is not a directory.');
+  }
+  return realTarget;
+}
 
 export function registerOsTools(registry: ToolRegistry): void {
   // 1. open_folder
@@ -20,14 +45,19 @@ export function registerOsTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const folder = params.folderPath && params.folderPath !== '.' ? params.folderPath : process.cwd();
+      let folder: string;
+      try {
+        folder = resolveWorkspaceDir(params.folderPath);
+      } catch (err: any) {
+        return { success: false, error: sanitizeErrorMessage(err, 'Invalid folder path.'), message: sanitizeErrorMessage(err, 'Invalid folder path.') };
+      }
       return new Promise((resolve) => {
-        exec(`explorer.exe "${folder}"`, (err) => {
+        execFile('explorer.exe', [folder], { shell: false }, (err) => {
           // Explorer often exits with code 1 even on success in Windows, so we report success if no fatal error
-          if (err && err.code !== 1) {
-            resolve({ success: false, error: err.message, message: 'Failed to open File Explorer.' });
+          if (err && (err as any).code !== 1) {
+            resolve({ success: false, error: sanitizeErrorMessage(err, 'Failed to open File Explorer.'), message: 'Failed to open File Explorer.' });
           } else {
-            resolve({ success: true, message: `Opened folder: ${folder}` });
+            resolve({ success: true, message: `Opened folder: ${path.basename(folder)}` });
           }
         });
       });
@@ -43,37 +73,36 @@ export function registerOsTools(registry: ToolRegistry): void {
       parameters: {
         appName: {
           type: 'string',
-          description: 'Name of the application: "calc" (Calculator), "notepad" (Notepad), "mspaint" (Paint), "code" (VS Code).',
+          description: 'Name of the application: "calc" (Calculator), "notepad" (Notepad), "mspaint" (Paint).',
           required: true
         }
       }
     },
     async (params): Promise<ToolResult> => {
-      const appKey = (params.appName || '').toLowerCase();
-      const whitelist: Record<string, string> = {
-        calc: 'calc.exe',
-        calculator: 'calc.exe',
-        notepad: 'notepad.exe',
-        mspaint: 'mspaint.exe',
-        paint: 'mspaint.exe',
-        code: 'code .'
+      const appKey = (params.appName || '').trim().toLowerCase();
+      const whitelist: Record<string, { exe: string; args: string[] }> = {
+        calc: { exe: 'calc.exe', args: [] },
+        calculator: { exe: 'calc.exe', args: [] },
+        notepad: { exe: 'notepad.exe', args: [] },
+        mspaint: { exe: 'mspaint.exe', args: [] },
+        paint: { exe: 'mspaint.exe', args: [] }
       };
 
-      const cmd = whitelist[appKey];
-      if (!cmd) {
+      const entry = whitelist[appKey];
+      if (!entry) {
         return {
           success: false,
-          error: `Safety boundary: Application "${params.appName}" is not in the approved safe list. Supported: calculator, notepad, paint.`,
-          message: `Application "${params.appName}" is not approved for direct execution.`
+          error: 'Application is not in the approved safe list. Supported: calculator, notepad, paint.',
+          message: 'Application is not approved for direct execution.'
         };
       }
 
       return new Promise((resolve) => {
-        exec(`start ${cmd}`, (err) => {
+        execFile(entry.exe, entry.args, { shell: false }, (err) => {
           if (err) {
-            resolve({ success: false, error: err.message, message: `Could not launch ${params.appName}.` });
+            resolve({ success: false, error: sanitizeErrorMessage(err, 'Could not launch application.'), message: 'Could not launch application.' });
           } else {
-            resolve({ success: true, message: `Launched ${params.appName} successfully.` });
+            resolve({ success: true, message: `Launched ${appKey} successfully.` });
           }
         });
       });
@@ -95,25 +124,27 @@ export function registerOsTools(registry: ToolRegistry): void {
       }
     },
     async (params): Promise<ToolResult> => {
-      const url = params.url || '';
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      let safeUrl: string;
+      try {
+        safeUrl = await assertSafePublicHttpUrl(params.url || '');
+      } catch (err: any) {
         return {
           success: false,
-          error: 'Only valid http:// or https:// URLs can be opened.',
-          message: 'Invalid URL scheme.'
+          error: sanitizeErrorMessage(err, 'Only valid public http:// or https:// URLs can be opened.'),
+          message: 'Invalid or restricted URL.'
         };
       }
 
-      return new Promise((resolve) => {
-        // Strict shell metacharacter and URL validation to prevent command injection
-      if (/["'`$;&|<>^%\\\0\r\n]/.test(url)) {
-        return resolve({ success: false, error: 'Command injection blocked: URL contains prohibited shell metacharacters.', message: 'Invalid URL.' });
+      if (/[\s"'`$&|<>^%\\\0\r\n;]/.test(safeUrl)) {
+        return { success: false, error: 'URL contains prohibited characters.', message: 'Invalid URL.' };
       }
-      exec(`start "" "${url.replace(/"/g, '')}"`, (err) => {
+
+      return new Promise((resolve) => {
+        execFile('rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl], { shell: false }, (err) => {
           if (err) {
-            resolve({ success: false, error: err.message, message: 'Failed to launch URL in browser.' });
+            resolve({ success: false, error: sanitizeErrorMessage(err, 'Failed to launch URL in browser.'), message: 'Failed to launch URL in browser.' });
           } else {
-            resolve({ success: true, message: `Opened URL in your default browser: ${url}` });
+            resolve({ success: true, message: `Opened URL in your default browser: ${safeUrl}` });
           }
         });
       });

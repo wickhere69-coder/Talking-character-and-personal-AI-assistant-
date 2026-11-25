@@ -17,6 +17,8 @@ import SessionMemoryModal from '@/components/ui/SessionMemoryModal';
 import { useSessionStore } from '@/store/sessionStore';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAppStore } from '@/store/appStore';
+import { useAuthStore } from '@/store/authStore';
+import LoginPage from '@/pages/LoginPage';
 import { voiceManager } from '@/services/voiceManager';
 import { auraController } from '@/services/auraConversationController';
 
@@ -35,6 +37,11 @@ function isAdminRoute(): boolean {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [isAdminOpen, setIsAdminOpen] = React.useState<boolean>(() => isAdminRoute());
+  const { isAuthenticated, isCheckingSession, checkSession } = useAuthStore();
+
+  React.useEffect(() => {
+    checkSession();
+  }, [checkSession]);
 
   React.useEffect(() => {
     const handleOpenAdmin = () => setIsAdminOpen(true);
@@ -76,6 +83,21 @@ export default function App() {
         }} />
       </Suspense>
     );
+  }
+
+  if (isCheckingSession) {
+    return (
+      <div className="w-screen h-screen bg-[#0B0D12] flex flex-col items-center justify-center gap-3 font-sans antialiased">
+        <span className="text-[28px] font-bold tracking-tight text-white">Aura</span>
+        <div className="w-44 h-1 rounded-full bg-[#1A1D27] overflow-hidden">
+          <div className="h-full w-1/2 bg-[#8B7CFF] rounded-full animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
   }
 
   return <MainApp />;

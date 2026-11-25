@@ -140,7 +140,7 @@ export async function synthesizeWithElevenLabs(
   modelId: string = 'eleven_turbo_v2_5',
   signal?: AbortSignal
 ): Promise<SynthesisResult> {
-  const key = apiKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');
+  const key = apiKey || '';
   const res = await fetch('/api/elevenlabs', {
     method: 'POST',
     headers: { 
@@ -189,11 +189,7 @@ export async function synthesizeWithElevenLabs(
 
 export async function saveElevenLabsKey(apiKey: string): Promise<boolean> {
   try {
-    if (apiKey && apiKey.trim()) {
-      localStorage.setItem('elevenlabs_api_key', apiKey.trim());
-    } else {
-      localStorage.removeItem('elevenlabs_api_key');
-    }
+    try { localStorage.removeItem('elevenlabs_api_key'); } catch {}
     const res = await fetch('/api/save-elevenlabs-key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

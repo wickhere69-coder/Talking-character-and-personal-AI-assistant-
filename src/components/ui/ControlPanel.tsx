@@ -1,7 +1,7 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useAppStore } from '@/store/appStore';
+import { useAuthStore } from '@/store/authStore';
 import { loadAllCuratedVoices } from '@/services/ttsService';
-import { saveElevenLabsKey } from '@/services/elevenLabsService';
 import { 
   SpeechRecognizerController,
   createSpeechRecognizer, 
@@ -13,8 +13,6 @@ import {
   streamAgentConversation,
   getAgentHealth, 
   clearAgentHistory, 
-  saveAgentApiKey, 
-  getAgentKeyStatus,
   getAgentHistory
 } from '@/services/agentService';
 import { auraController } from '@/services/auraConversationController';
@@ -32,7 +30,6 @@ import {
   Play,
   Check,
   Trash2,
-  Key,
   Maximize2,
   Focus,
   X,
@@ -41,27 +38,17 @@ import {
   MessageSquare,
   Mic,
   Waves,
-  Eye,
-  EyeOff,
   Search,
   CheckCircle2,
-  Database,
-  RefreshCw,
-  ExternalLink,
   Copy,
   ShieldCheck,
   Lock
 } from 'lucide-react';
-import {
-  fetchSupabaseStatus,
-  saveSupabaseConfig,
-  triggerSupabaseSync,
-  type SupabaseStatusResponse
-} from '@/services/supabaseClient';
 import { getSpeechCompletionDelay } from '@/utils/speechCompletionDelay';
 import { isComplexReasoning } from '@/utils/reasoningDetector';
 
 export default function ControlPanel() {
+  const { user, logout } = useAuthStore();
   const [chatViewMode, setChatViewMode] = useState<'chat' | 'sessions'>('chat');
   const {
     scriptText, setScriptText,
@@ -89,10 +76,7 @@ export default function ControlPanel() {
     isControlPanelCollapsed,
     setIsControlPanelCollapsed,
     isAlwaysOnMic,
-    setIsAlwaysOnMic,
-    voiceMode, setVoiceMode,
-    liveVoice, setLiveVoice,
-    isGeminiLiveConnected
+    setIsAlwaysOnMic
   } = useAppStore();
 
   // Drawer open state synced with store
@@ -109,41 +93,6 @@ export default function ControlPanel() {
   const [chatHistory, setChatHistory] = useState<Array<{ role: string; content: string }>>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyClearing, setHistoryClearing] = useState(false);
-
-  // API keys state
-  const [elevenLabsKey, setElevenLabsKey] = useState<string>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '';
-  });
-  const [grokKey, setGrokKey] = useState<string>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('grok_api_key') || localStorage.getItem('xai_api_key') || '' : '';
-  });
-  const [geminiKey, setGeminiKey] = useState<string>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') || '' : '';
-  });
-  const [showKeySecret, setShowKeySecret] = useState(false);
-  const [activeKeyProvider, setActiveKeyProvider] = useState<'gemini' | 'grok' | 'elevenlabs'>('gemini');
-  const [keyStatuses, setKeyStatuses] = useState<{ grok: boolean; gemini: boolean; elevenlabs: boolean }>({
-    grok: false,
-    gemini: false,
-    elevenlabs: false
-  });
-  const [keyToastMessage, setKeyToastMessage] = useState<string | null>(null);
-
-  // Supabase Cloud Database state
-  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('supabase_url') || '' : '';
-  });
-  const [supabaseKey, setSupabaseKey] = useState<string>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('supabase_anon_key') || '' : '';
-  });
-  const [showSupabaseKey, setShowSupabaseKey] = useState(false);
-  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatusResponse | null>(null);
-  const [supabaseLoading, setSupabaseLoading] = useState(false);
-  const [supabaseSyncing, setSupabaseSyncing] = useState(false);
-  const [supabaseToast, setSupabaseToast] = useState<string | null>(null);
-  const [showSqlHelper, setShowSqlHelper] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
-  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
 
   // Diagnostics health
   const [agentHealthInfo, setAgentHealthInfo] = useState<{
@@ -189,6 +138,13 @@ export default function ControlPanel() {
 
   // Initialize voices and check system health
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Purge any legacy client-side secret keys from localStorage
+      ['elevenlabs_api_key', 'grok_api_key', 'xai_api_key', 'gemini_api_key', 'supabase_anon_key', 'admin_secret'].forEach((k) => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+    }
+
     const init = async () => {
       try {
         const curVoices = await loadAllCuratedVoices();
@@ -225,27 +181,10 @@ export default function ControlPanel() {
           // health.model used for diagnostics only — don't override user's engine selection
         }
       } catch {}
-
-      try {
-        const keyStatus = await getAgentKeyStatus();
-        if (keyStatus) {
-          setKeyStatuses(keyStatus);
-        }
-      } catch {}
-
-      try {
-        const spStatus = await fetchSupabaseStatus();
-        if (spStatus) {
-          setSupabaseStatus(spStatus);
-          if (spStatus.url && !supabaseUrl) {
-            setSupabaseUrl(spStatus.url);
-          }
-        }
-      } catch {}
     };
 
     init();
-  }, [setVoices, setSelectedVoice, setTtsBackend, setAgentModelName, supabaseUrl]);
+  }, [setVoices, setSelectedVoice, setTtsBackend, setAgentModelName]);
 
   // Clean Markdown syntax before sending to speech synthesis
   const cleanTextForSpeech = (text: string): string => {
@@ -290,9 +229,8 @@ export default function ControlPanel() {
 
     const store = useAppStore.getState();
     const activeVoice = store.voices.find(v => v.id === store.selectedVoice) || store.voices[0];
-    const key = elevenLabsKey || (typeof window !== 'undefined' ? localStorage.getItem('elevenlabs_api_key') || '' : '');
-    await voiceManager.speak(cleaned, activeVoice, key, isInstantRepeat);
-  }, [elevenLabsKey, stopListening]);
+    await voiceManager.speak(cleaned, activeVoice, '', isInstantRepeat);
+  }, [stopListening]);
 
   // Main Agent Ask Handler
   const handleAskAgent = useCallback(async (rawPromptText?: string) => {
@@ -484,142 +422,6 @@ export default function ControlPanel() {
     setHistoryClearing(false);
   };
 
-  // Save API Key
-  const handleSaveKey = async (provider: 'gemini' | 'grok' | 'elevenlabs', val: string) => {
-    const trimmed = val.trim();
-    if (provider === 'gemini') {
-      setGeminiKey(trimmed);
-      try { localStorage.setItem('gemini_api_key', trimmed); } catch {}
-    } else if (provider === 'grok') {
-      setGrokKey(trimmed);
-      try { 
-        localStorage.setItem('grok_api_key', trimmed); 
-        localStorage.setItem('xai_api_key', trimmed); 
-      } catch {}
-    } else if (provider === 'elevenlabs') {
-      setElevenLabsKey(trimmed);
-      try { localStorage.setItem('elevenlabs_api_key', trimmed); } catch {}
-      saveElevenLabsKey(trimmed);
-    }
-
-    try {
-      await saveAgentApiKey(provider, trimmed);
-      setKeyStatuses(prev => ({ ...prev, [provider]: !!trimmed }));
-      setKeyToastMessage(`✓ ${provider.toUpperCase()} API key saved securely!`);
-      setTimeout(() => setKeyToastMessage(null), 3000);
-    } catch {
-      setKeyToastMessage(`✓ Key saved in client session`);
-      setTimeout(() => setKeyToastMessage(null), 3000);
-    }
-  };
-
-  const SCHEMA_SQL = `-- Supabase Schema for Talking Character & Personal AI Assistant
-CREATE TABLE IF NOT EXISTS public.memories (
-  id TEXT PRIMARY KEY,
-  key TEXT NOT NULL,
-  value TEXT NOT NULL,
-  category TEXT DEFAULT 'fact',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.tasks (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  status TEXT DEFAULT 'pending',
-  priority TEXT DEFAULT 'medium',
-  due_date TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  completed_at TIMESTAMPTZ
-);
-CREATE TABLE IF NOT EXISTS public.notes (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  tags TEXT[] DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.reminders (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  remind_at TEXT NOT NULL,
-  triggered BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.conversations (
-  id BIGSERIAL PRIMARY KEY,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL,
-  model_used TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.user_settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-ALTER TABLE public.memories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all anon" ON public.memories FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all anon" ON public.tasks FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all anon" ON public.notes FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all anon" ON public.reminders FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all anon" ON public.conversations FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH CHECK (true);`;
-
-  const handleConnectSupabase = async () => {
-    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
-      setSupabaseToast('Please provide both Project URL and Anon/Service Key');
-      setTimeout(() => setSupabaseToast(null), 3500);
-      return;
-    }
-    setSupabaseLoading(true);
-    setSupabaseToast(null);
-    try {
-      const res = await saveSupabaseConfig(supabaseUrl.trim(), supabaseKey.trim());
-      const updatedStatus = await fetchSupabaseStatus();
-      setSupabaseStatus(updatedStatus);
-      if (res.connection?.connected) {
-        setSupabaseToast('✓ Connected to Supabase successfully!');
-      } else {
-        setSupabaseToast(`⚠️ Connected, but check schema: ${res.connection?.message || 'Tables missing'}`);
-      }
-    } catch (err: any) {
-      setSupabaseToast(`✗ Error: ${err.message || 'Failed to connect'}`);
-    } finally {
-      setSupabaseLoading(false);
-      setTimeout(() => setSupabaseToast(null), 4500);
-    }
-  };
-
-  const handleSyncSupabase = async () => {
-    setSupabaseSyncing(true);
-    setSupabaseToast(null);
-    try {
-      const res = await triggerSupabaseSync('both');
-      const updatedStatus = await fetchSupabaseStatus();
-      setSupabaseStatus(updatedStatus);
-      setSupabaseToast(`✓ Cloud sync complete! (Memories: ${res.pulled?.memories ?? 0} pulled, Tasks: ${res.pulled?.tasks ?? 0} pulled)`);
-    } catch (err: any) {
-      setSupabaseToast(`✗ Sync failed: ${err.message || 'Error syncing'}`);
-    } finally {
-      setSupabaseSyncing(false);
-      setTimeout(() => setSupabaseToast(null), 4500);
-    }
-  };
-
-  const handleCopySql = () => {
-    if (navigator?.clipboard) {
-      navigator.clipboard.writeText(SCHEMA_SQL);
-      setCopiedSql(true);
-      setTimeout(() => setCopiedSql(false), 2500);
-    }
-  };
-
   // Filter voices: exclusively ElevenLabs voice pack
   const filteredVoices = voices.filter((v) => {
     const isEleven = v.backend === 'elevenlabs';
@@ -767,52 +569,6 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
           {/* ══════════════════════════════════════════════════════════════ */}
           {activeTab === 'voice' && (
             <div className="space-y-5">
-              {/* Conversation voice engine */}
-              <div className="p-3.5 rounded-[16px] bg-[#1A1D27] border border-[#23252F] space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-semibold text-[#F2F2F2] font-sans">Conversation voice</h3>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono border ${isGeminiLiveConnected ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25' : 'bg-[#262A38] text-[#7A7D86] border-[#2A2E3B]'}`}>
-                    {isGeminiLiveConnected ? 'Gemini Live connected' : 'Live offline'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    ['native_gemini_live', 'Gemini Live', 'Most natural · instant · real emotion'],
-                    ['custom_voice_pack', 'Voice pack', 'ElevenLabs voices below'],
-                  ] as const).map(([mode, label, hint]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setVoiceMode(mode)}
-                      className={`text-left p-2.5 rounded-[12px] border transition cursor-pointer ${voiceMode === mode ? 'bg-[#8B7CFF]/15 border-[#8B7CFF]/50' : 'bg-[#13151D] border-[#23252F] hover:border-[#8B7CFF]/30'}`}
-                    >
-                      <div className="text-xs font-semibold text-[#F2F2F2]">{label}</div>
-                      <div className="text-[10px] text-[#7A7D86] mt-0.5">{hint}</div>
-                    </button>
-                  ))}
-                </div>
-                {voiceMode === 'native_gemini_live' && (
-                  <label className="flex items-center justify-between gap-3 text-[11px] text-[#A0A3AD]">
-                    <span>Gemini voice</span>
-                    <select
-                      value={liveVoice}
-                      onChange={(e) => setLiveVoice(e.target.value)}
-                      className="bg-[#13151D] border border-[#23252F] rounded-full px-3 py-1.5 text-xs text-[#F2F2F2] focus:outline-none focus:border-[#8B7CFF]/60 cursor-pointer"
-                    >
-                      {[
-                        ['Aoede', 'Breezy'], ['Sulafat', 'Warm'], ['Leda', 'Youthful'], ['Achernar', 'Soft'],
-                        ['Vindemiatrix', 'Gentle'], ['Despina', 'Smooth'], ['Callirrhoe', 'Easy-going'], ['Autonoe', 'Bright'],
-                        ['Laomedeia', 'Upbeat'], ['Kore', 'Firm'], ['Achird', 'Friendly'], ['Sadachbia', 'Lively'],
-                        ['Puck', 'Upbeat'], ['Zephyr', 'Bright'], ['Charon', 'Informative'], ['Fenrir', 'Excitable'],
-                        ['Orus', 'Firm'], ['Gacrux', 'Mature'], ['Zubenelgenubi', 'Casual'], ['Iapetus', 'Clear'],
-                      ].map(([name, style]) => (
-                        <option key={name} value={name}>{name} — {style}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-
               {/* ElevenLabs Voice Pack Banner */}
               <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-[#1A1D27] border border-[#23252F]">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -1133,6 +889,24 @@ CREATE POLICY "Allow all anon" ON public.user_settings FOR ALL USING (true) WITH
                     Close-up
                   </button>
                 </div>
+              </div>
+              {/* Account & Session Card */}
+              <div className="p-4 rounded-[16px] bg-[#1A1D27] border border-[#2A2E3B] flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-[#FFFFFF] truncate">
+                    {user?.displayName || 'Aura Account'}
+                  </p>
+                  <p className="text-[11px] text-[#A7A9AF] truncate">
+                    {user?.email} • {user?.authProvider === 'google' ? 'Google' : 'Email'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  className="px-3.5 py-1.5 rounded-[12px] bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-300 text-xs font-medium shrink-0 cursor-pointer transition"
+                >
+                  Sign out
+                </button>
               </div>
             </div>          )}
 
